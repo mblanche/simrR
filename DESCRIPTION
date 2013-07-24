@@ -5,4 +5,3 @@ Version: 0.1
 Authors@R: person("Marco", "Blanchette",email="mab@stowers.org",role = c("aut", "cre"))
 Depends: R (>= 3.0.1)
 License: # getOptions('devtools.desc.license')
-LazyData: true
