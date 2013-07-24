@@ -1,0 +1,8 @@
+Package: simrR
+Title: Tools to help our life deals with NGS data at SIMR 
+Description: 
+Version: 0.1
+Authors@R: person("Marco", "Blanchette", role = c("aut", "cre"))
+Depends: R (>= 3.0.1)
+License: # getOptions('devtools.desc.license')
+LazyData: true
