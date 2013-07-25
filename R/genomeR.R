@@ -40,6 +40,7 @@ counterPerChr <-
         
         counts <- countOverlaps(gnModel, aln)
         names(counts) <- names(gnModel)
+        return(counts)
     }
 
 
