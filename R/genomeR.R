@@ -1,7 +1,3 @@
-require(GenomicFeatures)
-require(Rsamtools)
-require(parallel)
-
 counterPerChr <-
     function(seqname,fl,gnModel,mapq=10,lib.strand=c("none","sense","anti"),...){
         
@@ -379,8 +375,81 @@ covAlongTx <-
         return(res)
     }
 
+covsPerChr <-
+    function(chr,bam.path,lib.strand=c("none","sense","anti"),...){
+        
+        lib.strand <- match.arg(lib.strand)
+        
+        s.i <- seqinfo(BamFile(bam.path)) 
+        seq.length <- seqlengths(s.i)[chr]
+        param <- ScanBamParam(which=GRanges(chr, IRanges(1, seq.length)),
+                              what='mapq',
+                              tag='NH')
 
+        ## Read the alignment file
+        aln <- unlist(grglist(readGappedAlignments(bam.path,param=param)))
+        
+        ## What type of RNA-Seq library are we dealing with?
+        strand(aln) <- switch(lib.strand,
+                              none = "*",
+                              sense = strand(aln),
+                              anti  = ifelse(strand(aln) == "+","-","+")
+                              )
 
+        ## Compute the coverage
+        if (lib.strand == "*"){
+            covs <- coverage(aln)[[chr]]
+        } else {
+            covs <- list('+'=coverage(aln[strand(aln)=='+'])[[chr]],
+                         '-'=coverage(aln[strand(aln)=='-'])[[chr]]
+                         )
+        }
+    }
 
+bams2Covs <-
+    function(BFL,lib.strand=c("none","sense","anti"),nCores=16,...){
+        lib.strand <- match.arg(lib.strand)
+        
+        chrs <- sapply(BFL,function(BFL) seqnames(seqinfo(BFL)))
+        bam.paths <- as.vector(sapply(BFL,function(BFL) rep(path(BFL),length(seqnames(seqinfo(BFL))))))
+        
+        covs <- mcmapply(covsPerChr,chrs,bam.paths,
+                         MoreArgs=list(lib.strand),
+                         SIMPLIFY=FALSE,
+                         mc.cores=nCores,
+                         mc.preschedule=FALSE
+                         )
+        
+        covs <- lapply(split(covs,bam.paths),function(covs){
+            if (lib.strand == '*'){
+                covs <- RleList(covs)
+            } else {
+                covs <- list('+' = RleList(lapply(covs,function(x) x$`+`)),
+                             '-' = RleList(lapply(covs,function(x) x$`-`)))
+                
+            }
+        })
+        names(covs) <- gsub("\\.bam","",basename(path(BFL)))
+        return(covs)
+    }
 
+bams2bw <-
+    function(BFL,lib.strand=c("none","sense","anti"),nCores=16,...){
+        
+        covs <- bams2Covs(BFL,lib.strand,nCores)
+        
+        covs.GR <- mclapply(unlist(covs),as,'GRanges',
+                            mc.cores=nCores,
+                            mc.preschedule=FALSE)
+        
+        bw <- paste(paste(rep(names(covs),sapply(covs,length)),
+                          ifelse(as.vector(sapply(covs,names))=='+','p','m'),sep="_"),
+                    "bw",sep=".")
+        
+        
+        mclapply(seq_along(covs.GR),function(i) export(covs.GR[[i]],bw[[i]]),
+                 mc.cores=16,
+                 mc.preschedule=FALSE)
+    }
 
+                                               
