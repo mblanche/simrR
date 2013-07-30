@@ -429,7 +429,7 @@ bams2Covs <-
                 
             }
         })
-        names(covs) <- gsub("\\.bam","",basename(path(BFL)))
+        names(covs) <- gsub("\\.bam$","",basename(path(BFL)))
         return(covs)
     }
 
@@ -439,7 +439,6 @@ bams2bw <-
         dir.create(destdir,FALSE,TRUE)
         
         covs <- bams2Covs(BFL,lib.strand,nCores)
-        
         covs.GR <- mclapply(unlist(covs),as,'GRanges',
                             mc.cores=nCores,
                             mc.preschedule=FALSE)
@@ -450,7 +449,7 @@ bams2bw <-
         
         
         mclapply(seq_along(covs.GR),function(i) export(covs.GR[[i]],bw[[i]]),
-                 mc.cores=16,
+                 mc.cores=nCores,
                  mc.preschedule=FALSE)
     }
 
