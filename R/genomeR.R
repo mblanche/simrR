@@ -434,7 +434,9 @@ bams2Covs <-
     }
 
 bams2bw <-
-    function(BFL,lib.strand=c("none","sense","anti"),nCores=16,...){
+    function(BFL,destdir=c("bigwig"),lib.strand=c("none","sense","anti"),nCores=16,...){
+
+        dir.create(destdir,FALSE,TRUE)
         
         covs <- bams2Covs(BFL,lib.strand,nCores)
         
