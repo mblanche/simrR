@@ -450,8 +450,9 @@ bams2bw <-
                               ifelse(as.vector(sapply(covs,names))=='+','p','m'),sep="_"),
                         "bw",sep=".")
         }
-        
-        mclapply(seq_along(covs.GR),function(i) export(covs.GR[[i]],bw[[i]]),
+
+        bw.path <- file.path(destdir,bw,3)
+        mclapply(seq_along(covs.GR),function(i) export(covs.GR[[i]],bw.path[[i]]),
                  mc.cores=nCores,
                  mc.preschedule=FALSE)
     }
