@@ -1,7 +1,3 @@
-require(Rsamtools)
-require(parallel)
-require(GenomicFeatures)
-
 counterPerChr <-
     function(seqname,fl,gnModel,mapq=10,lib.strand=c("none","sense","anti"),...){
         
@@ -375,7 +371,7 @@ covAlongTx <-
     }
 
 covsPerChr <-
-    function(chr,bam.path,lib.strand=c("none","sense","anti"),...){
+    function(chr,bam.path,lib.strand=c("none","sense","anti")){
         
         lib.strand <- match.arg(lib.strand)
         
@@ -386,7 +382,7 @@ covsPerChr <-
                               tag='NH')
 
         ## Read the alignment file
-        aln <- unlist(grglist(readGappedAlignments(bam.path,param=param)))
+        aln <- GenomicRanges::unlist(grglist(readGappedAlignments(bam.path,param=param)))
         
         ## What type of RNA-Seq library are we dealing with?
         strand(aln) <- switch(lib.strand,
@@ -403,14 +399,15 @@ covsPerChr <-
                          '-'=coverage(aln[strand(aln)=='-'])[[chr]]
                          )
         }
+
     }
 
 bams2Covs <-
-    function(BFL,lib.strand=c("none","sense","anti"),nCores=16,...){
+    function(BFL,lib.strand=c("none","sense","anti"),nCores=16){
         
         lib.strand <- match.arg(lib.strand)
         
-        chrs <- sapply(BFL,function(BFL) seqnames(seqinfo(BFL)))
+        chrs <- as.vector(sapply(BFL,function(BFL) seqnames(seqinfo(BFL))))
         bam.paths <- as.vector(sapply(BFL,function(BFL) rep(path(BFL),length(seqnames(seqinfo(BFL))))))
         
         covs <- mcmapply(covsPerChr,chrs,bam.paths,
@@ -434,15 +431,15 @@ bams2Covs <-
     }
 
 bams2bw <-
-    function(BFL,destdir=c("bigwig"),lib.strand=c("none","sense","anti"),nCores=16,...){
+    function(BFL,destdir=c("bigwig"),lib.strand=c("none","sense","anti"),nCores=16){
+        require(Rsamtools)
         require(rtracklayer)
 
+        lib.strand <- match.arg(lib.strand)
+        
         dir.create(destdir,FALSE,TRUE)
         
         covs <- bams2Covs(BFL,lib.strand,nCores)
-        covs.GR <- mclapply(unlist(covs),as,'GRanges',
-                            mc.cores=nCores,
-                            mc.preschedule=FALSE)
 
         if(lib.strand == 'none'){
             bw <- paste(names(covs),"bw",sep=".")
@@ -451,9 +448,13 @@ bams2bw <-
                               ifelse(as.vector(sapply(covs,names))=='+','p','m'),sep="_"),
                         "bw",sep=".")
         }
-
+        
         bw.path <- file.path(destdir,bw)
-        mclapply(seq_along(covs.GR),function(i) export(covs.GR[[i]],bw.path[[i]]),
+        ## covs.GR <- mclapply(unlist(covs),as,'GRanges',
+        ##                     mc.cores=nCores,
+        ##                     mc.preschedule=FALSE)
+        flat.covs <- unlist(covs)
+        mclapply(seq_along(flat.covs),function(i) export(as(flat.covs[[i]],'GRanges'),bw.path[[i]]),
                  mc.cores=nCores,
                  mc.preschedule=FALSE)
     }
