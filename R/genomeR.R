@@ -1,3 +1,7 @@
+require(Rsamtools)
+require(parallel)
+require(GenomicFeatures)
+
 counterPerChr <-
     function(seqname,fl,gnModel,mapq=10,lib.strand=c("none","sense","anti"),...){
         
@@ -74,7 +78,6 @@ BamsGeneCount <- function(BFL,
 
 getReport <- function(DGE,ID2gene,FDR=0.01,logFC=log2(2)){
     require(edgeR)
-    require(GenomicFeatures)
     
     DGE$isUp <- DGE$table$logFC >= logFC & DGE$table$FDR <= FDR
     DGE$isDown <- DGE$table$logFC <= -logFC & DGE$table$FDR <= FDR
@@ -118,8 +121,6 @@ ixonify <- function(txdb){
 }
 
 parIndexBam <- function(BFL,cpu=12,...){
-    require(Rsamtools)  
-    require(parallel)
     
     BFL <- BFL[!file.exists(paste(path(BFL),".bai",sep=''))]
     if(length(BFL) == 0) return(NULL)
@@ -137,8 +138,6 @@ parIndexBam <- function(BFL,cpu=12,...){
 }
 
 topHatReport <- function(topHatDir,cpu=12,debug=FALSE){
-  require(Rsamtools)  
-  require(parallel)
 
   topHat.mapped <- BamFileList(list.files(path=topHatDir,pattern="^accepted_hits.bam$",recu=TRUE,full.names=TRUE))
   topHat.unmapped <- BamFileList(file.path(dirname(path(topHat.mapped)),'unmapped.bam'))
@@ -408,6 +407,7 @@ covsPerChr <-
 
 bams2Covs <-
     function(BFL,lib.strand=c("none","sense","anti"),nCores=16,...){
+        
         lib.strand <- match.arg(lib.strand)
         
         chrs <- sapply(BFL,function(BFL) seqnames(seqinfo(BFL)))
@@ -435,6 +435,7 @@ bams2Covs <-
 
 bams2bw <-
     function(BFL,destdir=c("bigwig"),lib.strand=c("none","sense","anti"),nCores=16,...){
+        require(rtracklayer)
 
         dir.create(destdir,FALSE,TRUE)
         
@@ -451,7 +452,7 @@ bams2bw <-
                         "bw",sep=".")
         }
 
-        bw.path <- file.path(destdir,bw,3)
+        bw.path <- file.path(destdir,bw)
         mclapply(seq_along(covs.GR),function(i) export(covs.GR[[i]],bw.path[[i]]),
                  mc.cores=nCores,
                  mc.preschedule=FALSE)
