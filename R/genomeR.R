@@ -442,11 +442,14 @@ bams2bw <-
         covs.GR <- mclapply(unlist(covs),as,'GRanges',
                             mc.cores=nCores,
                             mc.preschedule=FALSE)
-        
-        bw <- paste(paste(rep(names(covs),sapply(covs,length)),
-                          ifelse(as.vector(sapply(covs,names))=='+','p','m'),sep="_"),
-                    "bw",sep=".")
-        
+
+        if(lib.strand == 'none'){
+            bw <- paste(names(covs),"bw",sep=".")
+        } else {
+            bw <- paste(paste(rep(names(covs),sapply(covs,length)),
+                              ifelse(as.vector(sapply(covs,names))=='+','p','m'),sep="_"),
+                        "bw",sep=".")
+        }
         
         mclapply(seq_along(covs.GR),function(i) export(covs.GR[[i]],bw[[i]]),
                  mc.cores=nCores,
