@@ -397,7 +397,7 @@ covsPerChr <-
                               )
 
         ## Compute the coverage
-        if (lib.strand == "*"){
+        if (lib.strand == "none"){
             covs <- coverage(aln)[[chr]]
         } else {
             covs <- list('+'=coverage(aln[strand(aln)=='+'])[[chr]],
@@ -421,7 +421,7 @@ bams2Covs <-
                          )
         
         covs <- lapply(split(covs,bam.paths),function(covs){
-            if (lib.strand == '*'){
+            if (lib.strand == 'none'){
                 covs <- RleList(covs)
             } else {
                 covs <- list('+' = RleList(lapply(covs,function(x) x$`+`)),
