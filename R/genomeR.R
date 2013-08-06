@@ -44,6 +44,7 @@ BamsGeneCount <- function(BFL,
                           gnModel,
                           lib.strand=c("none","sense","anti"),
                           nCores=16,
+                          as.list=FALSE,
                           ...){
     lib.strand <- match.arg(lib.strand)
     ## Making sure there is an index
@@ -61,16 +62,26 @@ BamsGeneCount <- function(BFL,
                            ,mc.preschedule=FALSE
                            )
     
-    ## Reorganizing the lists of counts per chromosome into a list of counts per file
-    counts <- lapply(split(counts.raw,f=files),function(cnts){
+    ## Reorganizing the lists of counts per chromosome, returning a SummearizedExperiment as default or a list
+    ## As before
+    counts <- sapply(split(counts.raw,f=files),function(cnts){
         to.ret <- do.call(c,cnts)
         names(to.ret) <- unlist(sapply(cnts,names))
-        to.ret
-    })
-    
-    names(counts) <- sub("\\.bam","",basename(names(BFL)))
+        to.add <- rep(0,sum(!names(gnModel) %in% names(to.ret)))
+        names(to.add) <- rownames(gnModel)[!names(gnModel) %in% names(to.ret)]
+        c(to.ret,to.add)
+    },simplify=!as.list)
+
+    if (as.list){
+        names(counts) <- sub("\\.bam","",basename(names(BFL)))
+    } else {
+        colnames(counts) <- sub("\\.bam","",basename(names(BFL)))
+        counts <- SummarizedExperiment(assays=SimpleList(counts=counts),rowData=gnModel)
+    }
     return(counts)
 }
+
+
 
 getReport <- function(DGE,ID2gene,FDR=0.01,logFC=log2(2)){
     require(edgeR)
