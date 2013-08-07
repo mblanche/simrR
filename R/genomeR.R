@@ -50,9 +50,9 @@ BamsGeneCount <- function(BFL,
     ## Making sure there is an index
     parIndexBam(BFL,nCores)
 
-    chrs <- sapply(BFL,function(BFL) seqnames(seqinfo(BFL)))
+    chrs <- as.vector(sapply(BFL,function(BFL) seqnames(seqinfo(BFL))))
     files <- rep(names(BFL),each=length(seqnames(seqinfo(BFL[[1]]))))
-    ## Reading the bam files, in parrels one chromosome at a time
+    ## Reading the bam files, in parallel, one chromosome at a time
     counts.raw <- mcmapply(counterPerChr
                            ,chrs
                            ,files
@@ -68,7 +68,7 @@ BamsGeneCount <- function(BFL,
         to.ret <- do.call(c,cnts)
         names(to.ret) <- unlist(sapply(cnts,names))
         to.add <- rep(0,sum(!names(gnModel) %in% names(to.ret)))
-        names(to.add) <- rownames(gnModel)[!names(gnModel) %in% names(to.ret)]
+        names(to.add) <- names(gnModel)[!names(gnModel) %in% names(to.ret)]
         c(to.ret,to.add)
     },simplify=!as.list)
 
@@ -76,7 +76,7 @@ BamsGeneCount <- function(BFL,
         names(counts) <- sub("\\.bam","",basename(names(BFL)))
     } else {
         colnames(counts) <- sub("\\.bam","",basename(names(BFL)))
-        counts <- SummarizedExperiment(assays=SimpleList(counts=counts),rowData=gnModel)
+        counts <- SummarizedExperiment(assays=SimpleList(counts=counts),rowData=gnModel[rownames(counts)])
     }
     return(counts)
 }
