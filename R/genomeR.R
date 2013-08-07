@@ -24,7 +24,7 @@ counterPerChr <-
         aln <- aln[!values(aln)$mapq <= mapq]
         ## Subseting our gnModel to only models on the curent chromsome
         if (class(gnModel) == "GRangesList"){
-            gnModel <- gnModel[seqnames(unlist(range(gnModel))) == seqname]
+            gnModel <- gnModel[seqnames(IRanges::unlist(range(gnModel))) == seqname]
         } else if (class(gnModel) == "GRanges"){
             gnModel <- gnModel[seqnames(gnModel) == seqname]
         } else {
