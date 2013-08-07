@@ -75,8 +75,11 @@ BamsGeneCount <- function(BFL,
     if (as.list){
         names(counts) <- sub("\\.bam","",basename(names(BFL)))
     } else {
-        colnames(counts) <- sub("\\.bam","",basename(names(BFL)))
-        counts <- SummarizedExperiment(assays=SimpleList(counts=counts),rowData=gnModel[rownames(counts)])
+        colData <- DataFrame(files=file.path(normalizePath(dirname(names(BFL))),basename(names(BFL))),
+                             row.names=sub("\\.bam","",basename(names(BFL))))
+        counts <- SummarizedExperiment(assays=SimpleList(counts=counts)
+                                       ,rowData=gnModel[rownames(counts)]
+                                       ,colData=colData)
     }
     return(counts)
 }
