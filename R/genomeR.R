@@ -24,7 +24,7 @@ counterPerChr <-
         aln <- aln[!values(aln)$mapq <= mapq]
         ## Subseting our gnModel to only models on the curent chromsome
         if (class(gnModel) == "GRangesList"){
-            gnModel <- gnModel[seqnames(IRanges::unlist(range(gnModel))) == seqname]
+            gnModel <- gnModel[seqnames(unlist(range(gnModel))) == seqname]
         } else if (class(gnModel) == "GRanges"){
             gnModel <- gnModel[seqnames(gnModel) == seqname]
         } else {
@@ -308,95 +308,113 @@ getFeatCov <- function(feat,covs){
             return(cov)
 }
 
+getTxRelCov <- 
+    function(BFL,tx,lib.strand=c("anti","sense"),min.lim=50,nCores=16,n=100,...){
+        meta.covs <- covAlongTx(BFL,tx,lib.strand,min.lim,nCores,...)
+        
+        rel.covs <- lapply(meta.covs,function(tx.cov){
+            lapply(tx.cov,function(tx.cov){
+                cov.sample <- mclapply(tx.cov,function(x){sample.x <- approx(x,n=n)$y
+                                                          sample.x/sum(sample.x)},mc.cores=nCores)
+                do.call(rbind,cov.sample)
+            })
+        })
+        d <- data.frame(x=rep(1:n,length(rel.covs)),
+                        sense = as.vector(sapply(rel.covs,function(x) colMeans(x$sense,na.rm=TRUE))),
+                        anti = as.vector(sapply(rel.covs,function(x) colMeans(x$anti,na.rm=TRUE))),
+                        treat= rep(names(rel.covs),n)
+                        )
+    }
 
 covAlongTx <-
-    function(BFL,txdbfile,lib.strand=c("anti","sense"),min.lim=10,nCores=16,...){
+    function(BFL,tx,lib.strand=c("anti","sense"),min.lim=50,nCores=16,...){
         lib.strand <- match.arg(lib.strand)
-        txdb<-loadDb(txdbfile)
-        tx <- exonsBy(txdb,"tx")
         
-        seqlevels(tx,force=TRUE) <- seqlevels(seqinfo(BFL[[1]]))
-        seqlevels(tx,force=TRUE) <- seqlevels(tx)[!isCircular(tx)]
+        ## Make sure I will not stumble of problematic tx
+        if (!all(seqlevels(tx) %in% seqlevels(seqinfo(BFL[[1]])))){
+            seqlevels(tx,force=TRUE) <- seqlevels(seqinfo(BFL[[1]]))
+        }
         
-        txRelCov <-function(chr,BF,gnModel){
+        if(!any(isCircular(tx))) {
+            seqlevels(tx,force=TRUE) <- seqlevels(tx)[!isCircular(tx)]
+        }
+         
+        
+        readAln <-function(id,chrs,BFL,gnModel){
+            chr <- chrs[id]
+            BF <- BFL[[id]]
             gnModel <- gnModel[seqnames(unlist(range(gnModel))) == chr]
-            
             s.i <- seqinfo(BF) 
             seq.length <- seqlengths(s.i)[chr]
             param <- ScanBamParam(which=GRanges(chr, IRanges(1, seq.length)),
                                   tag='NH')
-            
             ## Read the alignment file
             aln <- readGappedAlignments(BF,param=param)
             ## fllip the aln strd if strandness is anti
             if (lib.strand == 'anti'){strand(aln) <- ifelse(strand(aln) == "+","-","+")}
             ## Removing aligned reads with more than one aligments
             aln <- aln[!values(aln)$NH > 1]
-            
-            ## Do not use aligments overlapping more than one genes
-            aln <- aln[countOverlaps(aln, gnModel)==1 ]
-            
-            counts <- countOverlaps(gnModel, aln)
 
-            gnModel <- gnModel[counts >= min.lim]
+            #gnModel <- gnModel[countOverlaps(unlist(range(gnModel)),aln) > min.lim]
+            gnModel <- gnModel[countOverlaps(gnModel,aln) > min.lim]
+            tx.strand <- as.vector(strand(unlist(range(gnModel))))
+            
             exons <- unlist(gnModel)
-            
+            ## Split gapped alignmets
             split.aln <- unlist(grglist(aln))
-            split.aln <- split.aln[width(split.aln) > 3]
-            ## Only keeps reads fully over
-            exons.aln <- split.aln[unique(queryHits(findOverlaps(split.aln,exons,type='within')))]
             
-            covs <- list('+'=coverage(exons.aln[strand(exons.aln) == '+']),
-                         '-'=coverage(exons.aln[strand(exons.aln) == '-']))
+            exons.aln <- split.aln[unique(queryHits(findOverlaps(split.aln,exons)))]
             
-            exon.cov <- lapply(seq_along(exons),function(i) getFeatCov(exons[i],covs))
+            covs <- lapply(c('+','-'),function(s){cov <- coverage(exons.aln[strand(exons.aln) == s])
+                                                  cov <- cov[[as.character(chr)]]
+                                                  if(s == '-'){cov <- rev(cov)}
+                                                  ex.cov <- Views(cov,ranges(exons))
+                                                  t <- as.list(viewApply(ex.cov,as.vector,simplify=FALSE))
+                                                  tt <- split(t,rep(seq_along(gnModel),elementLengths(gnModel)))
+                                                  tx.cov <- sapply(tt,function(x) Rle(do.call(c,x)))
+                                                  list(sense = tx.cov[tx.strand == s],
+                                                       anti  = tx.cov[tx.strand != s])
+                                              })
             
-            tx.cov <- sapply(split(exon.cov,rep(seq_along(gnModel),elementLengths(gnModel))),
-                             function(cov) do.call(c,cov))
-
-            tx.rel.cov <- mapply(function(x,y) x/y, tx.cov,counts[counts >= min.lim])
-            names(tx.rel.cov) <- names(gnModel)
-            tx.rel.cov
+            res <- list(sense=do.call(c,lapply(covs,function(x) x$sense)),
+                        anti=do.call(c,lapply(covs,function(x) x$anti)))
         }
         
-        chr <- seqnames(seqinfo(tx))
-        raw.res <- mcmapply(txRelCov,
-                            chr,
-                            rep(BFL,each=length(chr)),
-                            MoreArgs=list(tx),
-                            mc.cores=nCores,
-                            mc.preschedule=FALSE,
-                            SIMPLIFY=FALSE
-                            )
+        chrs <- rep(unique(seqnames(unlist(range(tx)))),length(BFL))
+        files <- rep(BFL,each=length(unique(chrs)))
+        raw.covs <- mclapply(seq_along(files),
+                             readAln,
+                             chrs,
+                             files,
+                             tx,
+                             mc.cores=nCores,
+                             mc.preschedule=FALSE
+                             )
 
-        mat <- mclapply(do.call(c,raw.res),function(t) {
-            start <- round(seq(1,length(t),length.out=101))[-101]
-            end <- c(start[-1]-1,length(t))
-            apply( data.frame(start,end),1,function(x) mean(t[x[1]:x[2]]))
-        },mc.cores=nCores)
-        
 
-        skeleton <- sapply(split(raw.res,names(rep(BFL,each=length(chr)))),function(x) sum(sapply(x,length)))
-
-        res <- lapply(split(mat,rep(names(skeleton),skeleton)),function(x) t(do.call(cbind,x)))
+        res <- mclapply(split(raw.covs,names(BFL)),function(raw.covs){
+            list(sense=RleList(do.call(c,lapply(raw.covs,function(x) x$sense))),
+                 anti=RleList(do.call(c,lapply(raw.covs,function(x) x$anti))))}
+                        ,mc.cores=nCores
+                        ,mc.preschedule=FALSE)
 
         names(res) <- sub("\\.bam$","",basename(names(BFL)))
         return(res)
     }
 
 covsPerChr <-
-    function(chr,bam.path,lib.strand=c("none","sense","anti")){
+    function(chr,BF,lib.strand=c("none","sense","anti")){
         
         lib.strand <- match.arg(lib.strand)
         
-        s.i <- seqinfo(BamFile(bam.path)) 
+        s.i <- seqinfo(BF)
         seq.length <- seqlengths(s.i)[chr]
         param <- ScanBamParam(which=GRanges(chr, IRanges(1, seq.length)),
                               what='mapq',
                               tag='NH')
 
         ## Read the alignment file
-        aln <- GenomicRanges::unlist(grglist(readGappedAlignments(bam.path,param=param)))
+        aln <- unlist(grglist(readGappedAlignments(BF,param=param)))
         
         ## What type of RNA-Seq library are we dealing with?
         strand(aln) <- switch(lib.strand,
