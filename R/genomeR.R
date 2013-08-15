@@ -87,7 +87,6 @@ BamsGeneCount <- function(BFL,
 
 
 getReport <- function(DGE,ID2gene,FDR=0.01,logFC=log2(2)){
-    require(edgeR)
     
     DGE$isUp <- DGE$table$logFC >= logFC & DGE$table$FDR <= FDR
     DGE$isDown <- DGE$table$logFC <= -logFC & DGE$table$FDR <= FDR
@@ -130,75 +129,62 @@ ixonify <- function(txdb){
   psetdiff(genes,uxons)
 }
 
-parIndexBam <- function(BFL,cpu=12,...){
-    
+parIndexBam <- function(BFL,nCores=16,...){
     BFL <- BFL[!file.exists(paste(path(BFL),".bai",sep=''))]
     if(length(BFL) == 0) return(NULL)
-    
-    ## No reason to be wastefull on ressources
-    nClus <- ifelse(length(BFL) < cpu,length(BFL),cpu)
-    
     ## Make sure the bam files are indexed
-    ##mclapply(BFL,indexBam,mc.core=nClus,mc.preschedule=FALSE)
     mclapply(BFL,function(BF){
         system(paste('samtools index',path(BF),sep=" "))
-    },mc.cores=nClus,mc.preschedule=FALSE)
-    
+    },mc.cores=nCores,mc.preschedule=FALSE)
     return(NULL)
 }
 
-topHatReport <- function(topHatDir,cpu=12,debug=FALSE){
+topHatReport <- function(topHatDir,nCores=16){
 
   topHat.mapped <- BamFileList(list.files(path=topHatDir,pattern="^accepted_hits.bam$",recu=TRUE,full.names=TRUE))
   topHat.unmapped <- BamFileList(file.path(dirname(path(topHat.mapped)),'unmapped.bam'))
 
   stopifnot(length(topHat.mapped) == length(topHat.unmapped))
-    
-  if(debug){topHat.mapped <- topHat.mapped[1]
-            topHat.unmapped <- topHat.unmapped[1]}
             
-  parIndexBam(c(topHat.mapped,topHat.unmapped))
+  parIndexBam(c(topHat.mapped,topHat.unmapped),nCores)
   
   toProcess <-
     do.call(rbind,lapply(topHat.mapped,function(file){data.frame(chr=seqnames(seqinfo(file)),
                                                                  file=path(file),
                                                                  stringsAsFactors=FALSE)
                                                     }))
-  ## No reason to be wastefull on ressources
-  nClus <- ifelse(nrow(toProcess) < cpu,nrow(toProcess),cpu)
-  
   counter <-function(d){
-    fl <- d$file
-    seqname <- d$chr
-    
-    s.i <- seqinfo(BamFile(fl)) 
-    seq.length <- seqlengths(s.i)[seqname]
-    param <- ScanBamParam(which=GRanges(seqname, IRanges(1, seq.length)),
-                          flag = scanBamFlag(isUnmappedQuery=NA)
-                          ,tag='NH')
-    
-    ## Read the alignment file
-    aln <- readGappedAlignments(fl,param=param)
-    
-    tab.cnt <- table(values(aln)$NH)
-    
-    ## normalize the counts per their number of hits
+      fl <- d$file
+      seqname <- d$chr
+      
+      s.i <- seqinfo(BamFile(fl)) 
+      seq.length <- seqlengths(s.i)[seqname]
+      param <- ScanBamParam(which=GRanges(seqname, IRanges(1, seq.length)),
+                            flag = scanBamFlag(isUnmappedQuery=NA)
+                            ,tag='NH')
+      
+      ## Read the alignment file
+      aln <- readGappedAlignments(fl,param=param)
+      
+      tab.cnt <- table(values(aln)$NH)
+      
+      ## normalize the counts per their number of hits
     tab.cnt <- tab.cnt/as.numeric(names(tab.cnt))
-    
+      
     counts <- c(unique=tab.cnt[as.numeric(names(tab.cnt))==1]/1e6,
                 multi.match=sum(tab.cnt[as.numeric(names(tab.cnt))>1])/1e6)
   }
   ## map the counts per chromosome per file
   mapped.data <- mclapply(split(toProcess,1:nrow(toProcess)),
                           counter,
-                          mc.cores=nClus,
+                          mc.cores=nCores,
                           mc.preschedule=FALSE
                           )
   
   ## Reduce to 1) chromosomes 2) files
   reduced.data <- lapply(split(mapped.data,toProcess$file),function(perFile){
-    d <- do.call(rbind,perFile)
-    colSums(d)
+      d <- do.call(rbind,perFile)
+      colSums(d)
   })
   
   unmapped.reads <- mclapply(topHat.unmapped,function(BF) countBam(BF)$records/1e6,
@@ -224,18 +210,16 @@ topHatReport <- function(topHatDir,cpu=12,debug=FALSE){
 
 
 reportFracSense <-
-    function(BFL,txdbfile,min.lim=10,lib.strand=c("anti","sense"),CPU=16,...){
-        lib.strand <- match.arg(lib.strand)
-        txdb<-loadDb(txdbfile)
+    function(BFL,txdb,min.lim=50,lib.strand=c("anti","sense"),nCores=16,...){
         genes <- unlist(range(exonsBy(txdb,"gene")))
-
         genes <- genes[seqnames(genes) %in% seqnames(seqinfo(BFL[[1]]))]
         
-        fracSense <-function(seqname,BF,gnModel){
+        fracSense <-function(id,chrs,BFL,gnModel){
+            chr <- chrs[id]
+            BF <- BFL[[id]]
             s.i <- seqinfo(BF)
-
-            seq.length <- seqlengths(s.i)[seqname]
-            param <- ScanBamParam(which=GRanges(seqname, IRanges(1, seq.length)),
+            seq.length <- seqlengths(s.i)[chr]
+            param <- ScanBamParam(which=GRanges(chr, IRanges(1, seq.length)),
                                   tag='NH')
             
             ## Read the alignment file
@@ -249,7 +233,7 @@ reportFracSense <-
             ## Removing aligned reads with more than one aligments
             aln <- aln[!values(aln)$NH > 1]
             
-            gnModel <- gnModel[seqnames(gnModel) == seqname]
+            gnModel <- gnModel[seqnames(gnModel) == chr]
             anti.gnModel <- gnModel
             strand(anti.gnModel) <- ifelse(strand(gnModel)=="+","-","+")
             
@@ -267,16 +251,17 @@ reportFracSense <-
         }
         
         chr <- unique(seqnames(genes))
-        raw.res <- mcmapply(fracSense,
-                            chr,
+        raw.res <- mclapply(seq_along(rep(chr,length(BFL))),
+                            fracSense,
+                            rep(chr,length(BFL)),
                             rep(BFL,each=length(chr)),
-                            MoreArgs=list(genes),
-                            mc.cores=CPU,
+                            genes,
+                            mc.cores=nCores,
                             mc.preschedule=FALSE
                             )
-
+        
         res <- lapply(split(raw.res,names(rep(BFL,each=length(chr)))),function(l) do.call(c,l))
-
+        
         names(res) <- sub("\\.bam$","",basename(names(BFL)))
         return(res)
     }
@@ -308,39 +293,64 @@ getFeatCov <- function(feat,covs){
             return(cov)
 }
 
-getTxRelCov <- 
+getTxRelCov<- 
     function(BFL,tx,lib.strand=c("anti","sense"),min.lim=50,nCores=16,n=100,...){
-        meta.covs <- covAlongTx(BFL,tx,lib.strand,min.lim,nCores,...)
+        meta.covs <- featCovViews(BFL,tx,lib.strand,min.lim,nCores,...)
+
+        getBlocks <- Vectorize(function(start,width,n){
+            base <- rep(width %/% n,n)
+            rem <- rep(0,n)
+            rem[sample(1:n,width %% n)] <- 1
+            IR.width <- base+rem
+            starts <- c(start,(cumsum(IR.width)+1)[-n])
+            IRanges(start = starts,
+                    width=IR.width)
+        },c('start','width'))
+
+
+        fragFeats <- function(view){
+            ## First, fragment each IRanges in equal parts of almost equal size
+            IRL <- IRangesList(mclapply(view,function(v){
+                if(length(v)==0){IRanges()}
+                else{do.call(c,getBlocks(start(v),width(v),n))}
+            }
+                                        ,mc.cores=nCores
+                                        ,mc.preschedule=FALSE))
+            Views(subject(view),IRL)
+        }
         
-        rel.covs <- lapply(meta.covs,function(tx.cov){
-            lapply(tx.cov,function(tx.cov){
-                cov.sample <- mclapply(tx.cov,function(x){sample.x <- approx(x,n=n)$y
-                                                          sample.x/sum(sample.x)},mc.cores=nCores)
-                do.call(rbind,cov.sample)
-            })
-        })
-        d <- data.frame(x=rep(1:n,length(rel.covs)),
-                        sense = as.vector(sapply(rel.covs,function(x) colMeans(x$sense,na.rm=TRUE))),
-                        anti = as.vector(sapply(rel.covs,function(x) colMeans(x$anti,na.rm=TRUE))),
-                        treat= rep(names(rel.covs),n)
-                        )
+        getFragSum <- function(RVL){
+            RleList(mclapply(RVL,function(view) Rle(viewSums(view)),mc.cores=nCores,mc.preschedule=FALSE))
+        }
+
+        relCovs <- function(RLL.FRAG,RLL.FEAT){
+            RLL.REL.COV <- RLL.FRAG/RleList(lapply(RLL.FEAT,rep,each=n))
+            res <- lapply(RLL.REL.COV,function(RL){if(length(RL) == 0){return()}
+                                                   matrix(as.vector(RL),ncol=n,byrow=TRUE)})
+            res <- do.call(rbind,res[sapply(res,function(x) !is.null(dim(x)))])
+        }
+        
+        frag.covs <- lapply(meta.covs,fragFeats)
+        frag.sums <- lapply(frag.covs,getFragSum)
+        feat.sums <- lapply(meta.covs,getFragSum)
+        
+        res <- mapply(relCovs,frag.sums,feat.sums,SIMPLIFY=FALSE)
     }
 
-covAlongTx <-
-    function(BFL,tx,lib.strand=c("anti","sense"),min.lim=50,nCores=16,...){
+
+featCovViews <-
+    function(BFL,features,lib.strand=c("anti","sense"),min.lim=50,nCores=16,...){
         lib.strand <- match.arg(lib.strand)
         
         ## Make sure I will not stumble of problematic tx
-        if (!all(seqlevels(tx) %in% seqlevels(seqinfo(BFL[[1]])))){
-            seqlevels(tx,force=TRUE) <- seqlevels(seqinfo(BFL[[1]]))
+        if (!all(seqlevels(features) %in% seqlevels(seqinfo(BFL[[1]])))){
+            seqlevels(features,force=TRUE) <- seqlevels(seqinfo(BFL[[1]]))
+        }
+        if(any(isCircular(features))) {
+            seqlevels(features,force=TRUE) <- seqlevels(features)[!isCircular(features)]
         }
         
-        if(!any(isCircular(tx))) {
-            seqlevels(tx,force=TRUE) <- seqlevels(tx)[!isCircular(tx)]
-        }
-         
-        
-        readAln <-function(id,chrs,BFL,gnModel){
+        computeCovs <-function(id,chrs,BFL,gnModel){
             chr <- chrs[id]
             BF <- BFL[[id]]
             gnModel <- gnModel[seqnames(unlist(range(gnModel))) == chr]
@@ -354,53 +364,65 @@ covAlongTx <-
             if (lib.strand == 'anti'){strand(aln) <- ifelse(strand(aln) == "+","-","+")}
             ## Removing aligned reads with more than one aligments
             aln <- aln[!values(aln)$NH > 1]
-
-            #gnModel <- gnModel[countOverlaps(unlist(range(gnModel)),aln) > min.lim]
-            gnModel <- gnModel[countOverlaps(gnModel,aln) > min.lim]
-            tx.strand <- as.vector(strand(unlist(range(gnModel))))
-            
-            exons <- unlist(gnModel)
             ## Split gapped alignmets
             split.aln <- unlist(grglist(aln))
             
-            exons.aln <- split.aln[unique(queryHits(findOverlaps(split.aln,exons)))]
+            ##gnModel <- gnModel[countOverlaps(unlist(range(gnModel)),aln) > min.lim]
+            gnModel <- gnModel[countOverlaps(gnModel,aln) > min.lim]
+            gn.strand <- as.vector(strand(unlist(range(gnModel))))
             
-            covs <- lapply(c('+','-'),function(s){cov <- coverage(exons.aln[strand(exons.aln) == s])
-                                                  cov <- cov[[as.character(chr)]]
-                                                  if(s == '-'){cov <- rev(cov)}
-                                                  ex.cov <- Views(cov,ranges(exons))
-                                                  t <- as.list(viewApply(ex.cov,as.vector,simplify=FALSE))
-                                                  tt <- split(t,rep(seq_along(gnModel),elementLengths(gnModel)))
-                                                  tx.cov <- sapply(tt,function(x) Rle(do.call(c,x)))
-                                                  list(sense = tx.cov[tx.strand == s],
-                                                       anti  = tx.cov[tx.strand != s])
-                                              })
+            ## There is a ~3X gain in speed in calculting the coverage if only
+            ## Subseting on reads overlaping the features (including the findOverlaps overhead)
+            comps.aln <- split.aln[unique(queryHits(findOverlaps(split.aln,unlist(gnModel))))]
+            covs <- lapply(c('+','-'),function(s) coverage(comps.aln[strand(comps.aln) == s]))
+            names(covs) <- c('+','-')
             
-            res <- list(sense=do.call(c,lapply(covs,function(x) x$sense)),
-                        anti=do.call(c,lapply(covs,function(x) x$anti)))
+            cov.views <- sapply(c('+','-'),function(s){
+                cov <- covs[[s]][[as.character(chr)]]
+                comps <- unlist(gnModel[gn.strand==s])
+                comps.view <- Views(cov,ranges(comps))
+                names(comps.view) <- NULL
+                ## Return an RLE of the coverage for every feature parts in gnModel
+                ## Flip the coverages if we are dealing with feature on the negative strand
+                comps.cov <- do.call(c,viewApply(comps.view,function(cov){if(s=='-'){rev(cov)}else{cov}}))
+                feat.width <- sapply(split(width(comps),rep(seq_along(gnModel[gn.strand==s]),
+                                                            elementLengths(gnModel[gn.strand==s]))),sum)
+                if (length(comps.cov)==0){
+                    ## If nothing to return, return an empty RleViews
+                    return(Views(Rle(),IRanges()))
+                } else {
+                    ## Otherwise, return a views of the concat tx coverage
+                    feat.views <- Views(comps.cov,
+                                        IRanges(start=c(1,cumsum(feat.width[-length(feat.width)])+1),width=feat.width))
+                    names(feat.views) <- names(gnModel[gn.strand==s])
+                    return(feat.views)
+                }
+            })
+            Views(c(subject(cov.views$'+'),subject(cov.views$'-')),
+                  c(ranges(cov.views$'+'),shift(ranges(cov.views$'-'),length(subject(cov.views$'+')))))
         }
         
-        chrs <- rep(unique(seqnames(unlist(range(tx)))),length(BFL))
-        files <- rep(BFL,each=length(unique(chrs)))
-        raw.covs <- mclapply(seq_along(files),
-                             readAln,
-                             chrs,
-                             files,
-                             tx,
+        chrs <- unique(seqnames(unlist(range(features))))
+        raw.covs <- mclapply(seq_along(rep(chrs,length(BFL))),
+                             computeCovs,
+                             rep(chrs,length(BFL)),
+                             rep(BFL,each=length(chrs)),
+                             features,
                              mc.cores=nCores,
                              mc.preschedule=FALSE
                              )
-
-
-        res <- mclapply(split(raw.covs,names(BFL)),function(raw.covs){
-            list(sense=RleList(do.call(c,lapply(raw.covs,function(x) x$sense))),
-                 anti=RleList(do.call(c,lapply(raw.covs,function(x) x$anti))))}
-                        ,mc.cores=nCores
-                        ,mc.preschedule=FALSE)
-
+        
+        res <- lapply(split(raw.covs,names(rep(BFL,each=length(chrs)))),
+                      function(v){ r <- RleViewsList(v)
+                                   names(r) <- chrs
+                                   return(r)
+                               })
         names(res) <- sub("\\.bam$","",basename(names(BFL)))
         return(res)
     }
+
+            
+
 
 covsPerChr <-
     function(chr,BF,lib.strand=c("none","sense","anti")){
