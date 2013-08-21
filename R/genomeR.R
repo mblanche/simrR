@@ -296,47 +296,54 @@ getFeatCov <- function(feat,covs){
 getTxRelCov<- 
     function(BFL,tx,lib.strand=c("anti","sense"),min.lim=50,nCores=16,n=100,...){
         meta.covs <- featCovViews(BFL,tx,lib.strand,min.lim,nCores,...)
-
+        ##Remove chromsomes with no elements
+        meta.covs <- lapply(meta.covs,function(view){view[sapply(view,length) > 0]})
+        ##################################################
+        ## Helper functions
+        ##################################################
+        ## This breaks a region define by start and width in n fragmetns of almost
+        ## equal size. Returns the broken parts as a IRanges object to be reatach to teh Views objet
         getBlocks <- Vectorize(function(start,width,n){
-            base <- rep(width %/% n,n)
-            rem <- rep(0,n)
-            rem[sample(1:n,width %% n)] <- 1
-            IR.width <- base+rem
-            starts <- c(start,(cumsum(IR.width)+1)[-n])
-            IRanges(start = starts,
+            IR.width <- rep(width %/% n,n) + c(rep(1,width %% n),rep(0,n-(width %% n)))
+            starts <- cumsum(c(start,IR.width))
+            IRanges(start = starts[-length(starts)],
                     width=IR.width)
         },c('start','width'))
-
-
-        fragFeats <- function(view){
+        ##################################################
+        ## Break the views in coverages of n parts
+        ##################################################
+        fragFeats <- function(view,n=100,nCores=16){
             ## First, fragment each IRanges in equal parts of almost equal size
             IRL <- IRangesList(mclapply(view,function(v){
-                if(length(v)==0){IRanges()}
-                else{do.call(c,getBlocks(start(v),width(v),n))}
+                do.call(c,getBlocks(start(v),width(v),n))
             }
                                         ,mc.cores=nCores
-                                        ,mc.preschedule=FALSE))
+                                        ,mc.preschedule=FALSE)
+                               )
             Views(subject(view),IRL)
         }
-        
-        getFragSum <- function(RVL){
+        ##################################################
+        ## Return the sum of the framgent coverage
+        ##################################################
+        getFragSum <- function(RVL,nCores=16){
             RleList(mclapply(RVL,function(view) Rle(viewSums(view)),mc.cores=nCores,mc.preschedule=FALSE))
         }
-
+        ##################################################
+        ## Compute the relative coveage
+        ##################################################
         relCovs <- function(RLL.FRAG,RLL.FEAT){
             RLL.REL.COV <- RLL.FRAG/RleList(lapply(RLL.FEAT,rep,each=n))
             res <- lapply(RLL.REL.COV,function(RL){if(length(RL) == 0){return()}
                                                    matrix(as.vector(RL),ncol=n,byrow=TRUE)})
             res <- do.call(rbind,res[sapply(res,function(x) !is.null(dim(x)))])
         }
-        
+        ## This is where the meat is!
         frag.covs <- lapply(meta.covs,fragFeats)
         frag.sums <- lapply(frag.covs,getFragSum)
         feat.sums <- lapply(meta.covs,getFragSum)
         
         res <- mapply(relCovs,frag.sums,feat.sums,SIMPLIFY=FALSE)
     }
-
 
 featCovViews <-
     function(BFL,features,lib.strand=c("anti","sense"),min.lim=50,nCores=16,...){
