@@ -188,7 +188,7 @@ topHatReport <- function(topHatDir,nCores=16){
   })
   
   unmapped.reads <- mclapply(topHat.unmapped,function(BF) countBam(BF)$records/1e6,
-                             mc.cores=nClus,
+                             mc.cores=nCores,
                              mc.preschedule=FALSE
                              )
   counts <- data.frame(t(mapply(c,reduced.data,unmapped.reads)))
@@ -353,7 +353,7 @@ featCovViews <-
         if (!all(seqlevels(features) %in% seqlevels(seqinfo(BFL[[1]])))){
             seqlevels(features,force=TRUE) <- seqlevels(seqinfo(BFL[[1]]))
         }
-        if(any(isCircular(features))) {
+        if(any(isCircular(features)[!is.na(isCircular(features))])) {
             seqlevels(features,force=TRUE) <- seqlevels(features)[!isCircular(features)]
         }
         
@@ -432,7 +432,9 @@ featCovViews <-
 
 
 covsPerChr <-
-    function(chr,BF,lib.strand=c("none","sense","anti")){
+    function(id,chrs,bam.paths,lib.strand=c("none","sense","anti")){
+        chr <- chrs[id]
+        BF <- BamFile(bam.paths[id])
         
         lib.strand <- match.arg(lib.strand)
         
@@ -471,12 +473,15 @@ bams2Covs <-
         chrs <- as.vector(sapply(BFL,function(BFL) seqnames(seqinfo(BFL))))
         bam.paths <- as.vector(sapply(BFL,function(BFL) rep(path(BFL),length(seqnames(seqinfo(BFL))))))
         
-        covs <- mcmapply(covsPerChr,chrs,bam.paths,
-                         MoreArgs=list(lib.strand),
-                         SIMPLIFY=FALSE,
+        covs <- mclapply(seq_along(chrs),
+                         covsPerChr,
+                         chrs,
+                         bam.paths,
+                         lib.strand,
                          mc.cores=nCores,
                          mc.preschedule=FALSE
                          )
+        names(covs) <- chrs
         
         covs <- lapply(split(covs,bam.paths),function(covs){
             if (lib.strand == 'none'){
@@ -484,7 +489,6 @@ bams2Covs <-
             } else {
                 covs <- list('+' = RleList(lapply(covs,function(x) x$`+`)),
                              '-' = RleList(lapply(covs,function(x) x$`-`)))
-                
             }
         })
         names(covs) <- gsub("\\.bam$","",basename(path(BFL)))
@@ -493,31 +497,39 @@ bams2Covs <-
 
 bams2bw <-
     function(BFL,destdir=c("bigwig"),lib.strand=c("none","sense","anti"),nCores=16){
-        require(Rsamtools)
-        require(rtracklayer)
-
         lib.strand <- match.arg(lib.strand)
         
         dir.create(destdir,FALSE,TRUE)
         
         covs <- bams2Covs(BFL,lib.strand,nCores)
-
+                
         if(lib.strand == 'none'){
             bw <- paste(names(covs),"bw",sep=".")
         } else {
-            bw <- paste(paste(rep(names(covs),sapply(covs,length)),
-                              ifelse(as.vector(sapply(covs,names))=='+','p','m'),sep="_"),
-                        "bw",sep=".")
+            suffix <- paste0("_",c('p','m'),'.bw')
+            bw <- as.vector(sapply(sub("\\.bam$","",basename(names(BFL))),paste0,suffix))
         }
         
         bw.path <- file.path(destdir,bw)
-        ## covs.GR <- mclapply(unlist(covs),as,'GRanges',
-        ##                     mc.cores=nCores,
-        ##                     mc.preschedule=FALSE)
-        flat.covs <- unlist(covs)
-        mclapply(seq_along(flat.covs),function(i) export(as(flat.covs[[i]],'GRanges'),bw.path[[i]]),
+        covs.GR <- mclapply(unlist(covs),as,'GRanges',
+                            mc.cores=nCores,
+                            mc.preschedule=FALSE)
+
+        if(lib.strand=='anti'){
+            anti.cov <- covs.GR[seq_along(covs.GR)%%2 == 0]
+            anti.cov <- lapply(anti.cov,function(anti.cov){
+                values(anti.cov)$score <- -values(anti.cov)$score
+                anti.cov
+            })
+            covs.GR[seq_along(covs.GR)%%2 == 0] <- anti.cov
+        }
+
+        
+        mclapply(seq_along(covs.GR),function(i) export(covs.GR[[i]],bw.path[[i]]),
                  mc.cores=nCores,
                  mc.preschedule=FALSE)
     }
 
                                                
+
+
