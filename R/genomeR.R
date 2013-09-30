@@ -210,19 +210,19 @@ topHatReport <- function(topHatDir,nCores=16){
 
 
 reportFracSense <-
-    function(BFL,txdb,min.lim=50,lib.strand=c("anti","sense"),nCores=16,...){
+    function(BFL,txdb,min.reads=50,lib.strand=c("anti","sense"),nCores=16,...){
         genes <- unlist(range(exonsBy(txdb,"gene")))
-        genes <- genes[seqnames(genes) %in% seqnames(seqinfo(BFL[[1]]))]
+        ##genes <- genes[seqnames(genes) %in% seqnames(seqinfo(BFL[[1]]))]
         
         fracSense <-function(id,chrs,BFL,gnModel){
             chr <- chrs[id]
             BF <- BFL[[id]]
-            s.i <- seqinfo(BF)
-            seq.length <- seqlengths(s.i)[chr]
-            param <- ScanBamParam(which=GRanges(chr, IRanges(1, seq.length)),
+            ## If reading a chr without genes, return imediately
+            if(!chr %in% seqlevels(gnModel)) return()
+
+            ## Otherwise, read the bam on that chr
+            param <- ScanBamParam(which=GRanges(chr, IRanges(1, seqlengths(seqinfo(BF))[chr])),
                                   tag='NH')
-            
-            ## Read the alignment file
             aln <- readGappedAlignments(BF,param=param)
             
             ## What type of RNA-Seq library are we dealing with?
@@ -243,26 +243,28 @@ reportFracSense <-
             sense <- countOverlaps(gnModel, aln)
             anti <-  countOverlaps(anti.gnModel, aln)
             frac.sense <- sense/(sense+anti)
-            
-            frac.sense[(sense+anti) <= min.lim] <- NA
+            ## Only report for gene with at least min.lim reads overlapping
+            frac.sense[(sense+anti) <= min.reads] <- NA
             names(frac.sense) <- names(gnModel)
             
             return(frac.sense)
         }
         
-        chr <- unique(seqnames(genes))
-        raw.res <- mclapply(seq_along(rep(chr,length(BFL))),
+        chrs <- as.vector(sapply(BFL,seqlevels))
+        BFL2chrs <- rep(BFL,sapply(BFL,function(BF) length(seqlevels(BF))))
+        
+        raw.res <- mclapply(seq_along(chrs),
                             fracSense,
-                            rep(chr,length(BFL)),
-                            rep(BFL,each=length(chr)),
+                            chrs,
+                            BFL2chrs,
                             genes,
                             mc.cores=nCores,
                             mc.preschedule=FALSE
                             )
         
-        res <- lapply(split(raw.res,names(rep(BFL,each=length(chr)))),function(l) do.call(c,l))
+        res <- lapply(split(raw.res,path(BFL2chrs)),function(l) do.call(c,l))
         
-        names(res) <- sub("\\.bam$","",basename(names(BFL)))
+        names(res) <- sub("\\.bam$","",basename(path(BFL)))
         return(res)
     }
 
@@ -294,7 +296,7 @@ getFeatCov <- function(feat,covs){
 }
 
 getTxRelCov<- 
-    function(BFL,tx,lib.strand=c("anti","sense"),min.lim=50,nCores=16,n=100,...){
+    function(BFL,tx,lib.strand=c("anti","sense","none"),min.lim=50,nCores=16,n=100,...){
         meta.covs <- featCovViews(BFL,tx,lib.strand,min.lim,nCores,...)
         ##Remove chromsomes with no elements
         meta.covs <- lapply(meta.covs,function(view){view[sapply(view,length) > 0]})
@@ -346,7 +348,7 @@ getTxRelCov<-
     }
 
 featCovViews <-
-    function(BFL,features,lib.strand=c("anti","sense"),min.lim=50,nCores=16,...){
+    function(BFL,features,lib.strand=c("anti","sense","none"),min.lim=50,nCores=16,...){
         lib.strand <- match.arg(lib.strand)
         
         ## Make sure I will not stumble of problematic tx
@@ -368,7 +370,12 @@ featCovViews <-
             ## Read the alignment file
             aln <- readGappedAlignments(BF,param=param)
             ## fllip the aln strd if strandness is anti
-            if (lib.strand == 'anti'){strand(aln) <- ifelse(strand(aln) == "+","-","+")}
+            ## What type of RNA-Seq library are we dealing with?
+            strand(aln) <- switch(lib.strand,
+                                  none = "*",
+                                  sense = strand(aln),
+                                  anti  = ifelse(strand(aln) == "+","-","+")
+                                  )
             ## Removing aligned reads with more than one aligments
             aln <- aln[!values(aln)$NH > 1]
             ## Split gapped alignmets
@@ -428,13 +435,11 @@ featCovViews <-
         return(res)
     }
 
-            
-
 
 covsPerChr <-
-    function(id,chrs,bam.paths,lib.strand=c("none","sense","anti")){
+    function(id,chrs,BFL,lib.strand=c("none","sense","anti")){
         chr <- chrs[id]
-        BF <- BamFile(bam.paths[id])
+        BF <- BFL[[id]]
         
         lib.strand <- match.arg(lib.strand)
         
@@ -470,20 +475,20 @@ bams2Covs <-
         
         lib.strand <- match.arg(lib.strand)
         
-        chrs <- as.vector(sapply(BFL,function(BFL) seqnames(seqinfo(BFL))))
-        bam.paths <- as.vector(sapply(BFL,function(BFL) rep(path(BFL),length(seqnames(seqinfo(BFL))))))
-        
+        chrs <- as.vector(sapply(BFL,seqlevels))
+        BFL2chrs <- rep(BFL,sapply(BFL,function(BF) length(seqlevels(BF))))
+                
         covs <- mclapply(seq_along(chrs),
                          covsPerChr,
                          chrs,
-                         bam.paths,
+                         BFL2chrs,
                          lib.strand,
                          mc.cores=nCores,
                          mc.preschedule=FALSE
                          )
         names(covs) <- chrs
         
-        covs <- lapply(split(covs,bam.paths),function(covs){
+        covs <- lapply(split(covs,path(BFL2chrs)),function(covs){
             if (lib.strand == 'none'){
                 covs <- RleList(covs)
             } else {
@@ -502,7 +507,7 @@ bams2bw <-
         dir.create(destdir,FALSE,TRUE)
         
         covs <- bams2Covs(BFL,lib.strand,nCores)
-                
+        
         if(lib.strand == 'none'){
             bw <- paste(names(covs),"bw",sep=".")
         } else {
@@ -530,6 +535,44 @@ bams2bw <-
                  mc.preschedule=FALSE)
     }
 
-                                               
+newStartPage <- function(...)
+    {
+        htmlParse("<html><head>
+    <script language=\"JavaScript\" src=\"http://bioinfo/~mab/rpts_xtra/jquery-1.8.0.min.js\"></script>
+    <script language=\"JavaScript\" src=\"http://bioinfo/~mab/rpts_xtra/jquery.dataTables-1.9.3.js\"></script>
+    <script language=\"JavaScript\" src=\"http://bioinfo/~mab/rpts_xtra/jquery.dataTables.columnFilter.js\"></script>
+    <script language=\"JavaScript\" src=\"http://bioinfo/~mab/rpts_xtra/jquery.dataTables.plugins.js\"></script>
+    <script language=\"JavaScript\" src=\"http://bioinfo/~mab/rpts_xtra/jquery.dataTables.reprise.js\"></script>
+    <script language=\"JavaScript\" src=\"http://bioinfo/~mab/rpts_xtra/bootstrap.js\"></script>
+    <script language=\"JavaScript\" src=\"http://bioinfo/~mab/rpts_xtra/TableTools.min.js\"></script>
+    <link rel=\"stylesheet\" type=\"text/css\" href=\"http://bioinfo/~mab/rpts_xtra/bootstrap.css\" />
+    <link rel=\"stylesheet\" type=\"text/css\" href=\"http://bioinfo/~mab/rpts_xtra/reprise.table.bootstrap.css\" />
+    <link rel=\"stylesheet\" type=\"text/css\" href=\"http://bioinfo/~mab/rpts_xtra/TableTools.css\" />
+    <link rel=\"stylesheet\" type=\"text/css\" href=\"http://bioinfo/~mab/rpts_xtra/TableTools_JUI.css\" />
+    </head><body></body></html>")
+    }
 
-
+makeHTMLSimr <- function(basePath, reportDirectory, shortName, ...)
+    {
+       loc = ReportingTools:::makeReportPath(basePath, reportDirectory, paste0(shortName, "_SIMR"))
+        new("ReportHandlers",
+            init = function(node, args)
+            {
+                rnode = xmlRoot(node)
+                realdom = do.call(args$startPage,args)
+                newrnode = xmlRoot(realdom)
+                removeChildren(rnode, kids = xmlChildren(rnode))
+                addChildren(rnode, kids = xmlChildren(newrnode))
+                node
+            },
+            ## finish by writing the file
+            finish =  function(rep, args)
+            {
+                saveXML(rep$.reportDOM, file=loc)
+            },
+            ## arguments are collected by handler, we want everything to   
+            ## go to the init handler...
+            args = list(init = list(startPage = newStartPage, ...)),
+            location = loc
+            )
+    }
