@@ -1,16 +1,17 @@
 counterPerChr <-
-    function(seqname,fl,gnModel,mapq=10,lib.strand=c("none","sense","anti"),...){
-        
+    function(i,chrs,BFLs,gnModel,mapq=10,lib.strand=c("none","sense","anti"),...){
         lib.strand <- match.arg(lib.strand)
-        
-        s.i <- seqinfo(BamFile(fl)) 
-        seq.length <- seqlengths(s.i)[seqname]
-        param <- ScanBamParam(which=GRanges(seqname, IRanges(1, seq.length)),
+
+        BF <- BFLs[[i]]
+        chr <- chrs[[i]]
+                
+        seq.length <- seqlengths(BF)[chr]
+        param <- ScanBamParam(which=GRanges(chr, IRanges(1, seq.length)),
                               what='mapq',
                               tag='NH')
 
         ## Read the alignment file
-        aln <- readGappedAlignments(fl,param=param)
+        aln <- readGappedAlignments(BF,param=param)
         
         ## What type of RNA-Seq library are we dealing with?
         strand(aln) <- switch(lib.strand,
@@ -24,9 +25,9 @@ counterPerChr <-
         aln <- aln[!values(aln)$mapq <= mapq]
         ## Subseting our gnModel to only models on the curent chromsome
         if (class(gnModel) == "GRangesList"){
-            gnModel <- gnModel[seqnames(unlist(range(gnModel))) == seqname]
+            gnModel <- gnModel[seqnames(unlist(range(gnModel))) == chr]
         } else if (class(gnModel) == "GRanges"){
-            gnModel <- gnModel[seqnames(gnModel) == seqname]
+            gnModel <- gnModel[seqnames(gnModel) == chr]
         } else {
             stop("Wrong gene model object")
         }
@@ -50,33 +51,34 @@ BamsGeneCount <- function(BFL,
     ## Making sure there is an index
     parIndexBam(BFL,nCores)
 
-    chrs <- as.vector(sapply(BFL,function(BFL) seqnames(seqinfo(BFL))))
-    files <- rep(names(BFL),each=length(seqnames(seqinfo(BFL[[1]]))))
+    chrs <- as.vector(sapply(BFL,seqlevels))
+    BFL.chrs <- rep(BFL,elementLengths(lapply(BFL,seqlevels)))
     ## Reading the bam files, in parallel, one chromosome at a time
-    counts.raw <- mcmapply(counterPerChr
+    counts.raw <- mclapply(seq_along(chrs)
+                           ,counterPerChr
                            ,chrs
-                           ,files
-                           ,MoreArgs=list(gnModel=gnModel,lib.strand=lib.strand)
-                           ,SIMPLIFY=FALSE
+                           ,BFL.chrs
+                           ,gnModel=gnModel
+                           ,lib.strand=lib.strand
                            ,mc.cores=nCores
                            ,mc.preschedule=FALSE
                            )
     
     ## Reorganizing the lists of counts per chromosome, returning a SummearizedExperiment as default or a list
     ## As before
-    counts <- sapply(split(counts.raw,f=files),function(cnts){
-        to.ret <- do.call(c,cnts)
-        names(to.ret) <- unlist(sapply(cnts,names))
-        to.add <- rep(0,sum(!names(gnModel) %in% names(to.ret)))
-        names(to.add) <- names(gnModel)[!names(gnModel) %in% names(to.ret)]
-        c(to.ret,to.add)
-    },simplify=!as.list)
-
+    counts <- mapply(function(cnts){to.ret <- do.call(c,cnts)
+                                    to.add <- rep(0,sum(!names(gnModel) %in% names(to.ret)))
+                                    names(to.add) <- names(gnModel)[!names(gnModel) %in% names(to.ret)]
+                                    c(to.ret,to.add)
+                                }
+                     ,split(counts.raw,path(BFL.chrs))
+                     ,SIMPLIFY=!as.list)
+    
     if (as.list){
-        names(counts) <- sub("\\.bam","",basename(names(BFL)))
+        names(counts) <- sub("\\.bam$","",basename(names(BFL)))
     } else {
         colData <- DataFrame(files=file.path(normalizePath(dirname(names(BFL))),basename(names(BFL))),
-                             row.names=sub("\\.bam","",basename(names(BFL))))
+                             row.names=sub("\\.bam$","",basename(names(BFL))))
         counts <- SummarizedExperiment(assays=SimpleList(counts=counts)
                                        ,rowData=gnModel[rownames(counts)]
                                        ,colData=colData)
@@ -133,9 +135,7 @@ parIndexBam <- function(BFL,nCores=16,...){
     BFL <- BFL[!file.exists(paste(path(BFL),".bai",sep=''))]
     if(length(BFL) == 0) return(NULL)
     ## Make sure the bam files are indexed
-    mclapply(BFL,function(BF){
-        system(paste('samtools index',path(BF),sep=" "))
-    },mc.cores=nCores,mc.preschedule=FALSE)
+    mclapply(BFL,indexBam,mc.cores=nCores,mc.preschedule=FALSE)
     return(NULL)
 }
 
@@ -349,11 +349,14 @@ getTxRelCov<-
 
 featCovViews <-
     function(BFL,features,lib.strand=c("anti","sense","none"),min.lim=50,nCores=16,...){
+        if(!is(BFL,'BamFileList')) stop("A BamFileList is required")
+        if(!length(BFL)>0) stop("Need to pass at least one BamFile")
         lib.strand <- match.arg(lib.strand)
+                
         
         ## Make sure I will not stumble of problematic tx
-        if (!all(seqlevels(features) %in% seqlevels(seqinfo(BFL[[1]])))){
-            seqlevels(features,force=TRUE) <- seqlevels(seqinfo(BFL[[1]]))
+        if (!all(seqlevels(features) %in% seqlevels(BFL[[1]]))){
+            seqlevels(features,force=TRUE) <- seqlevels(BFL[[1]])
         }
         if(any(isCircular(features)[!is.na(isCircular(features))])) {
             seqlevels(features,force=TRUE) <- seqlevels(features)[!isCircular(features)]
@@ -416,21 +419,26 @@ featCovViews <-
                   c(ranges(cov.views$'+'),shift(ranges(cov.views$'-'),length(subject(cov.views$'+')))))
         }
         
-        chrs <- unique(seqnames(unlist(range(features))))
-        raw.covs <- mclapply(seq_along(rep(chrs,length(BFL))),
+        chrs <- as.vector(sapply(BFL,seqlevels))
+        BFL.chrs <- rep(BFL,elementLengths(lapply(BFL,seqlevels)))
+        
+        raw.covs <- mclapply(seq_along(chrs),
                              computeCovs,
-                             rep(chrs,length(BFL)),
-                             rep(BFL,each=length(chrs)),
+                             chrs,
+                             BFL.chrs,
                              features,
                              mc.cores=nCores,
                              mc.preschedule=FALSE
                              )
         
-        res <- lapply(split(raw.covs,names(rep(BFL,each=length(chrs)))),
-                      function(v){ r <- RleViewsList(v)
-                                   names(r) <- chrs
-                                   return(r)
-                               })
+        res <- mapply(function(v,names){ r <- RleViewsList(v)
+                                         names(r) <- names
+                                         return(r)
+                                     }
+                      ,split(raw.covs,path(BFL.chrs))
+                      ,split(chrs,path(BFL.chrs))
+                      )
+
         names(res) <- sub("\\.bam$","",basename(names(BFL)))
         return(res)
     }
@@ -472,7 +480,8 @@ covsPerChr <-
 
 bams2Covs <-
     function(BFL,lib.strand=c("none","sense","anti"),nCores=16){
-        
+        if(!is(BFL,'BamFileList')) stop("A BamFileList is required")
+        if(!length(BFL)>0) stop("Need to pass at least one BamFile")
         lib.strand <- match.arg(lib.strand)
         
         chrs <- as.vector(sapply(BFL,seqlevels))
@@ -501,26 +510,26 @@ bams2Covs <-
     }
 
 bams2bw <-
-    function(BFL,destdir=c("bigwig"),lib.strand=c("none","sense","anti"),nCores=16){
+    function(BFL,destdir=c("bigwig"),lib.strand=c("none","sense","anti"),lib.norm=TRUE,nCores=16){
+        if(!is(BFL,'BamFileList')) stop("A BamFileList is required")
+        if(!length(BFL)>0) stop("Need to pass at least one BamFile")
         lib.strand <- match.arg(lib.strand)
-        
+                
+
+        if(!is(BFL,'BamFileList')) stop("A BamFileList is required")
+                                                                    
+        if(!length(BFL)>0) stop("Need to pass at least one BamFile")
+            
         dir.create(destdir,FALSE,TRUE)
         
         covs <- bams2Covs(BFL,lib.strand,nCores)
         
-        if(lib.strand == 'none'){
-            bw <- paste(names(covs),"bw",sep=".")
-        } else {
-            suffix <- paste0("_",c('p','m'),'.bw')
-            bw <- as.vector(sapply(sub("\\.bam$","",basename(names(BFL))),paste0,suffix))
-        }
-        
-        bw.path <- file.path(destdir,bw)
         covs.GR <- mclapply(unlist(covs),as,'GRanges',
                             mc.cores=nCores,
                             mc.preschedule=FALSE)
-
-        if(lib.strand=='anti'){
+        ## Ok, every even slot in the covs.GR list is of the negative strand (ie 1:lenght(list)%%2)
+        ## Flip the sign on the coverage value if the library is stranded
+        if(lib.strand!='none'){
             anti.cov <- covs.GR[seq_along(covs.GR)%%2 == 0]
             anti.cov <- lapply(anti.cov,function(anti.cov){
                 values(anti.cov)$score <- -values(anti.cov)$score
@@ -528,8 +537,22 @@ bams2bw <-
             })
             covs.GR[seq_along(covs.GR)%%2 == 0] <- anti.cov
         }
-
-        
+        ## Normalize the coverage over the library size
+        if(lib.norm){
+            covs.GR <- lapply(covs.GR,function(c){
+                values(c)$score <- values(c)$score/(abs(sum(as.numeric(values(c)$score)))/1e8)
+                return(c)
+            })
+        }
+        ## Creating file names and file paths        
+        if(lib.strand == 'none'){
+            bw <- paste(names(covs),"bw",sep=".")
+        } else {
+            suffix <- paste0("_",c('p','m'),'.bw')
+            bw <- as.vector(sapply(sub("\\.bam$","",basename(names(BFL))),paste0,suffix))
+        }
+        bw.path <- file.path(destdir,bw)
+        ## Exporting as bigwigs
         mclapply(seq_along(covs.GR),function(i) export(covs.GR[[i]],bw.path[[i]]),
                  mc.cores=nCores,
                  mc.preschedule=FALSE)
@@ -558,11 +581,14 @@ makeHTMLSimr <- function(basePath, reportDirectory, shortName, ...)
         new("ReportHandlers",
             init = function(node, args)
             {
+                ori.body = node[["body"]]
                 rnode = xmlRoot(node)
                 realdom = do.call(args$startPage,args)
                 newrnode = xmlRoot(realdom)
                 removeChildren(rnode, kids = xmlChildren(rnode))
                 addChildren(rnode, kids = xmlChildren(newrnode))
+                replaceNodes(rnode[["body"]],ori.body)
+
                 node
             },
             ## finish by writing the file
