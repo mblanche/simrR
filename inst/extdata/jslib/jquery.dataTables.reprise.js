@@ -28,15 +28,13 @@ function configureTable(i, el) {
     
     $(this).dataTable({
 	"sDom": "<'row'<'span6'l><'span6'f>r>t<'row'<'span6'i><'span6'p>>T",
-	//<'row'<'span6'l><'span6'f>r>t<'row'<'span6'i><'span6'p>>T<'clear'>",
-	//"sDom": 'T<"clear">lfrtip',
 	"oTableTools": {
 	    "sSwfPath": "jslib/copy_csv_xls_pdf.swf",
 	    "aButtons": [
 		"copy",
 		{
 		    "sExtends":    "collection",
-		    "sButtonText": "Ok!",
+		    "sButtonText": "save",
 		    "aButtons":    [ 
 			{
 			    "sExtends": "csv",
