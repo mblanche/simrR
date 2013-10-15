@@ -34,7 +34,7 @@ function configureTable(i, el) {
 		"copy",
 		{
 		    "sExtends":    "collection",
-		    "sButtonText": "save",
+		    "sButtonText": "Save",
 		    "aButtons":    [ 
 			{
 			    "sExtends": "csv",
