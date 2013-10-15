@@ -561,26 +561,61 @@ bams2bw <-
 newStartPage <- function(...)
     {
         htmlParse("<html><head>
-    <script language=\"JavaScript\" src=\"http://bioinfo/~mab/rpts_xtra/jquery-1.8.0.min.js\"></script>
-    <script language=\"JavaScript\" src=\"http://bioinfo/~mab/rpts_xtra/jquery.dataTables-1.9.3.js\"></script>
-    <script language=\"JavaScript\" src=\"http://bioinfo/~mab/rpts_xtra/jquery.dataTables.columnFilter.js\"></script>
-    <script language=\"JavaScript\" src=\"http://bioinfo/~mab/rpts_xtra/jquery.dataTables.plugins.js\"></script>
-    <script language=\"JavaScript\" src=\"http://bioinfo/~mab/rpts_xtra/jquery.dataTables.reprise.js\"></script>
-    <script language=\"JavaScript\" src=\"http://bioinfo/~mab/rpts_xtra/bootstrap.js\"></script>
-    <script language=\"JavaScript\" src=\"http://bioinfo/~mab/rpts_xtra/TableTools.min.js\"></script>
-    <link rel=\"stylesheet\" type=\"text/css\" href=\"http://bioinfo/~mab/rpts_xtra/bootstrap.css\" />
-    <link rel=\"stylesheet\" type=\"text/css\" href=\"http://bioinfo/~mab/rpts_xtra/reprise.table.bootstrap.css\" />
-    <link rel=\"stylesheet\" type=\"text/css\" href=\"http://bioinfo/~mab/rpts_xtra/TableTools.css\" />
-    <link rel=\"stylesheet\" type=\"text/css\" href=\"http://bioinfo/~mab/rpts_xtra/TableTools_JUI.css\" />
-    </head><body></body></html>")
+    <script language=\"JavaScript\" src=\"jslib/jquery-1.8.0.min.js\"></script>
+    <script language=\"JavaScript\" src=\"jslib/jquery.dataTables-1.9.3.js\"></script>
+    <script language=\"JavaScript\" src=\"jslib/jquery.dataTables.columnFilter.js\"></script>
+    <script language=\"JavaScript\" src=\"jslib/jquery.dataTables.plugins.js\"></script>
+    <script language=\"JavaScript\" src=\"jslib/jquery.dataTables.reprise.js\"></script>
+    <script language=\"JavaScript\" src=\"jslib/bootstrap.js\"></script>
+    <script language=\"JavaScript\" src=\"jslib/TableTools.min.js\"></script>
+    <link rel=\"stylesheet\" type=\"text/css\" href=\"csslib/bootstrap.css\" />
+    <link rel=\"stylesheet\" type=\"text/css\" href=\"csslib/reprise.table.bootstrap.css\" />
+    <link rel=\"stylesheet\" type=\"text/css\" href=\"csslib/TableTools.css\" />
+    <link rel=\"stylesheet\" type=\"text/css\" href=\"csslib/TableTools_JUI.css\" />
+    </head><body></body</html>")
     }
+
+moveRTFiles <- function(basePath,reportDirectory,...){
+    if(missing(basePath) || is.null(basePath)){
+        baseDir <- file.path(reportDirectory)
+    } else {
+        baseDir <- file.path(basePath,reportDirectory)
+    }
+    
+    csslib <- gsub("//+","/",file.path(baseDir,'csslib'))
+    imageslib <- gsub("//+","/",file.path(csslib,'images'))
+    jslib <- gsub("//+","/",file.path(baseDir,'jslib'))
+    
+    sapply(c(csslib,imageslib,jslib),
+           dir.create,
+           showWarnings=FALSE,
+           recursive=TRUE)
+    
+    css.files <- list.files(system.file("extdata/csslib",package='simrR'),pattern="\\.css$",
+                            full=TRUE)
+    js.files <- list.files(system.file("extdata/jslib",package='simrR'),pattern="\\.js$|\\.swf$",
+                           full=TRUE)
+    images <- list.files(system.file("extdata/csslib/images",package='simrR'),pattern="\\.png$",
+                         full=TRUE,
+                         recursive=TRUE)
+    cssDir <- gsub("//+","/",file.path(baseDir,"csslib"))
+    imagesDir <- gsub("//+","/",file.path(cssDir,"images"))
+    jsDir <- gsub("//+","/",file.path(baseDir,"jslib"))
+
+    file.copy(css.files,cssDir,overwrite=TRUE,recursive=TRUE)
+    file.copy(js.files,jsDir,overwrite=TRUE,recursive=TRUE)
+    file.copy(images,imagesDir,overwrite=TRUE,recursive=TRUE)
+
+}
 
 makeHTMLSimr <- function(basePath, reportDirectory, shortName, ...)
     {
-       loc = ReportingTools:::makeReportPath(basePath, reportDirectory, paste0(shortName, "_SIMR"))
+       loc = ReportingTools:::makeReportPath(basePath, reportDirectory,shortName)
         new("ReportHandlers",
             init = function(node, args)
             {
+                moveRTFiles(basePath,reportDirectory)
+                
                 ori.body = node[["body"]]
                 rnode = xmlRoot(node)
                 realdom = do.call(args$startPage,args)
@@ -588,7 +623,7 @@ makeHTMLSimr <- function(basePath, reportDirectory, shortName, ...)
                 removeChildren(rnode, kids = xmlChildren(rnode))
                 addChildren(rnode, kids = xmlChildren(newrnode))
                 replaceNodes(rnode[["body"]],ori.body)
-
+                
                 node
             },
             ## finish by writing the file
@@ -598,7 +633,7 @@ makeHTMLSimr <- function(basePath, reportDirectory, shortName, ...)
             },
             ## arguments are collected by handler, we want everything to   
             ## go to the init handler...
-            args = list(init = list(startPage = newStartPage, ...)),
+           args = list(init = list(startPage = newStartPage, ...)),
             location = loc
             )
     }
