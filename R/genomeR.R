@@ -210,7 +210,8 @@ topHatReport <- function(topHatDir,nCores=16){
 
 
 reportFracSense <-
-    function(BFL,txdb,min.reads=50,lib.strand=c("anti","sense"),nCores=16,...){
+    function(BFL,txdb,min.reads=50,lib.strand=c("anti","sense","none"),nCores=16,...){
+        lib.strand <- match.arg(lib.strand)
         genes <- unlist(range(exonsBy(txdb,"gene")))
         ##genes <- genes[seqnames(genes) %in% seqnames(seqinfo(BFL[[1]]))]
         
@@ -227,6 +228,7 @@ reportFracSense <-
             
             ## What type of RNA-Seq library are we dealing with?
             strand(aln) <- switch(lib.strand,
+                                  none = strand(aln),
                                   sense = strand(aln),
                                   anti  = ifelse(strand(aln) == "+","-","+")
                                   )
