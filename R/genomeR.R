@@ -391,7 +391,12 @@ featCovViews <-
             ## There is a ~3X gain in speed in calculting the coverage if only
             ## Subseting on reads overlaping the features (including the findOverlaps overhead)
             comps.aln <- split.aln[unique(queryHits(findOverlaps(split.aln,unlist(gnModel))))]
-            covs <- lapply(c('+','-'),function(s) coverage(comps.aln[strand(comps.aln) == s]))
+            if (lib.strand == 'none'){
+                covs <- list('+'=(all.covs <- coverage(comps.aln)),
+                             '-'=all.covs)
+            }else {
+                covs <- lapply(c('+','-'),function(s) coverage(comps.aln[strand(comps.aln) == s]))
+            }
             names(covs) <- c('+','-')
             
             cov.views <- sapply(c('+','-'),function(s){
