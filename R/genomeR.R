@@ -1,5 +1,5 @@
 counterPerChr <-
-    function(i,chrs,BFLs,gnModel,mapq=10,lib.strand=c("none","sense","anti"),...){
+    function(i,chrs,BFLs,gnModel,mapq=10,allow.multi=FALSE,lib.strand=c("none","sense","anti"),...){
         lib.strand <- match.arg(lib.strand)
 
         BF <- BFLs[[i]]
@@ -20,9 +20,9 @@ counterPerChr <-
                               anti  = ifelse(strand(aln) == "+","-","+")
                               )
         ## Removing aligned reads with more than one aligments
-        aln <- aln[!values(aln)$NH > 1]
+        if(!allow.multi) aln <- aln[!values(aln)$NH > 1]
         ## Removing the low map quality alignmentsw
-        aln <- aln[!values(aln)$mapq <= mapq]
+        if(!is.null(mapq)) aln <- aln[!values(aln)$mapq <= mapq]
         ## Subseting our gnModel to only models on the curent chromsome
         if (class(gnModel) == "GRangesList"){
             gnModel <- gnModel[seqnames(unlist(range(gnModel))) == chr]
@@ -50,7 +50,7 @@ BamsGeneCount <- function(BFL,
     lib.strand <- match.arg(lib.strand)
     ## Making sure there is an index
     parIndexBam(BFL,nCores)
-
+    ## Prepare the jobs to send to the multiCores
     chrs <- as.vector(sapply(BFL,seqlevels))
     BFL.chrs <- rep(BFL,elementLengths(lapply(BFL,seqlevels)))
     ## Reading the bam files, in parallel, one chromosome at a time
@@ -62,8 +62,8 @@ BamsGeneCount <- function(BFL,
                            ,lib.strand=lib.strand
                            ,mc.cores=nCores
                            ,mc.preschedule=FALSE
+                           ,...
                            )
-    
     ## Reorganizing the lists of counts per chromosome, returning a SummearizedExperiment as default or a list
     ## As before
     counts <- mapply(function(cnts){to.ret <- do.call(c,cnts)
@@ -73,7 +73,7 @@ BamsGeneCount <- function(BFL,
                                 }
                      ,split(counts.raw,path(BFL.chrs))
                      ,SIMPLIFY=!as.list)
-    
+    ## package the object (or return a list)
     if (as.list){
         names(counts) <- sub("\\.bam$","",basename(names(BFL)))
     } else {
@@ -85,43 +85,6 @@ BamsGeneCount <- function(BFL,
     }
     return(counts)
 }
-
-
-
-getReport <- function(DGE,ID2gene,FDR=0.01,logFC=log2(2)){
-    
-    DGE$isUp <- DGE$table$logFC >= logFC & DGE$table$FDR <= FDR
-    DGE$isDown <- DGE$table$logFC <= -logFC & DGE$table$FDR <= FDR
-        
-    gene.symb <- ID2gene$symbol[match(rownames(DGE$table),ID2gene$id)]
-    
-    cntl.s <- DGE$design[,1]-rowSums(DGE$design) == 0
-    exp.s <- DGE$samples$group == DGE$comparison
-    
-    read.counts <- round(DGE$fitted.values[,cntl.s|exp.s])
-    DGE.stats <- t(apply(DGE$table,1,sprintf,fmt=c(rep("%0.3f",3),rep("%0.2E",2))))
-
-    colnames(DGE.stats) <- colnames(DGE$table)
-    
-    fmt <- "[[http://flybase.org/reports/%s.html][%s]]"
-    FB.links <- sprintf(fmt,rownames(DGE$table),gene.symb)
-
-    RG <- unlist(range(gnModel))[rownames(DGE$table)]
-    RG <- resize(RG,round(width(RG) * 1.1),fix='center')
-
-    IGV.fmt <- '[[http://localhost:60151/goto?locus=%s:%s-%s][%s]]'
-    IGVlinks <- sprintf(IGV.fmt,seqnames(RG),start(RG),end(RG),'toIGV')
-    
-    DGE$reports <- data.frame(symbol=FB.links,
-                              read.counts,
-                              DGE.stats,
-                              "IGV links"=IGVlinks,
-                              stringsAsFactors=FALSE)
-    
-    DGE$counts <- data.frame(up=sum(DGE$isUp),down=sum(DGE$isDown))
-
-    return(DGE)
-  }
 
 uxonify <- function(txdb){ reduce(exonsBy(txdb,'gene')) }
 
