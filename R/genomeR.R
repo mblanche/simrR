@@ -11,7 +11,7 @@ counterPerChr <-
                               tag='NH')
 
         ## Read the alignment file
-        aln <- readGappedAlignments(BF,param=param)
+        aln <- readGAlignments(BF,param=param)
         
         ## What type of RNA-Seq library are we dealing with?
         strand(aln) <- switch(lib.strand,
@@ -44,6 +44,8 @@ counterPerChr <-
 BamsGeneCount <- function(BFL,
                           gnModel,
                           lib.strand=c("none","sense","anti"),
+                          mapq=10,
+                          allow.multi=FALSE,
                           nCores=16,
                           as.list=FALSE,
                           ...){
@@ -62,6 +64,8 @@ BamsGeneCount <- function(BFL,
                            ,lib.strand=lib.strand
                            ,mc.cores=nCores
                            ,mc.preschedule=FALSE
+                           ,mapq=mapq
+                           ,allow.multi=allow.multi
                            ,...
                            )
     ## Reorganizing the lists of counts per chromosome, returning a SummearizedExperiment as default or a list
@@ -73,6 +77,7 @@ BamsGeneCount <- function(BFL,
                                 }
                      ,split(counts.raw,path(BFL.chrs))
                      ,SIMPLIFY=!as.list)
+
     ## package the object (or return a list)
     if (as.list){
         names(counts) <- sub("\\.bam$","",basename(names(BFL)))
@@ -80,8 +85,8 @@ BamsGeneCount <- function(BFL,
         colData <- DataFrame(files=file.path(normalizePath(dirname(names(BFL))),basename(names(BFL))),
                              row.names=sub("\\.bam$","",basename(names(BFL))))
         counts <- SummarizedExperiment(assays=SimpleList(counts=counts)
-                                       ,rowData=gnModel[rownames(counts)]
                                        ,colData=colData)
+        if(!is.null(rownames(counts))) rowData(counts) <- gnModel[rownames(counts)]
     }
     return(counts)
 }
@@ -127,7 +132,7 @@ topHatReport <- function(topHatDir,nCores=16){
                             ,tag='NH')
       
       ## Read the alignment file
-      aln <- readGappedAlignments(fl,param=param)
+      aln <- readGAlignments(fl,param=param)
       
       tab.cnt <- table(values(aln)$NH)
       
@@ -187,7 +192,7 @@ reportFracSense <-
             ## Otherwise, read the bam on that chr
             param <- ScanBamParam(which=GRanges(chr, IRanges(1, seqlengths(seqinfo(BF))[chr])),
                                   tag='NH')
-            aln <- readGappedAlignments(BF,param=param)
+            aln <- readGAlignments(BF,param=param)
             
             ## What type of RNA-Seq library are we dealing with?
             strand(aln) <- switch(lib.strand,
@@ -336,7 +341,7 @@ featCovViews <-
             param <- ScanBamParam(which=GRanges(chr, IRanges(1, seq.length)),
                                   tag='NH')
             ## Read the alignment file
-            aln <- readGappedAlignments(BF,param=param)
+            aln <- readGAlignments(BF,param=param)
             ## fllip the aln strd if strandness is anti
             ## What type of RNA-Seq library are we dealing with?
             strand(aln) <- switch(lib.strand,
@@ -428,8 +433,7 @@ covsPerChr <-
                               tag='NH')
 
         ## Read the alignment file
-        aln <- unlist(grglist(readGappedAlignments(BF,param=param)))
-        
+        aln <- unlist(grglist(readGAlignments(BF,param=param)))
         ## What type of RNA-Seq library are we dealing with?
         strand(aln) <- switch(lib.strand,
                               none = "*",
