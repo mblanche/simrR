@@ -475,8 +475,8 @@ bams2Covs <-
             if (lib.strand == 'none'){
                 covs <- RleList(covs)
             } else {
-                covs <- list('+' = RleList(lapply(covs,function(x) x$`+`)),
-                             '-' = RleList(lapply(covs,function(x) x$`-`)))
+                covs <- list('+' = RleList(lapply(covs,function(x) x$`+`),compress=FALSE),
+                             '-' = RleList(lapply(covs,function(x) x$`-`),compress=FALSE))
             }
         })
         names(covs) <- gsub("\\.bam$","",basename(path(BFL)))
