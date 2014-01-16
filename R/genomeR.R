@@ -1,3 +1,11 @@
+chrToUCSC <- function(object){
+    renameSeqlevels(object,structure(paste0("chr",seqlevels(object)),names=seqlevels(object)))
+}
+
+chrFromUCSC <- function(object){
+    renameSeqlevels(object,structure(sub("^chr","",seqlevels(object)),names=seqlevels(object)))
+}
+
 counterPerChr <-
     function(i,chrs,BFLs,gnModel,mapq=10,allow.multi=FALSE,lib.strand=c("none","sense","anti"),...){
         lib.strand <- match.arg(lib.strand)
@@ -201,7 +209,7 @@ reportFracSense <-
                                   anti  = ifelse(strand(aln) == "+","-","+")
                                   )
             ## Removing aligned reads with more than one aligments
-            aln <- aln[!values(aln)$NH > 1]
+            aln <- aln[is.na(values(aln)$NH) | !values(aln)$NH > 1]
             
             gnModel <- gnModel[seqnames(gnModel) == chr]
             anti.gnModel <- gnModel
@@ -530,84 +538,4 @@ bams2bw <-
         mclapply(seq_along(covs.GR),function(i) export(covs.GR[[i]],bw.path[[i]]),
                  mc.cores=nCores,
                  mc.preschedule=FALSE)
-    }
-
-newStartPage <- function(...)
-    {
-        htmlParse("<html><head>
-    <script language=\"JavaScript\" src=\"jslib/jquery-1.8.0.min.js\"></script>
-    <script language=\"JavaScript\" src=\"jslib/jquery.dataTables-1.9.3.js\"></script>
-    <script language=\"JavaScript\" src=\"jslib/jquery.dataTables.columnFilter.js\"></script>
-    <script language=\"JavaScript\" src=\"jslib/jquery.dataTables.plugins.js\"></script>
-    <script language=\"JavaScript\" src=\"jslib/jquery.dataTables.reprise.js\"></script>
-    <script language=\"JavaScript\" src=\"jslib/bootstrap.js\"></script>
-    <script language=\"JavaScript\" src=\"jslib/TableTools.min.js\"></script>
-    <link rel=\"stylesheet\" type=\"text/css\" href=\"csslib/bootstrap.css\" />
-    <link rel=\"stylesheet\" type=\"text/css\" href=\"csslib/reprise.table.bootstrap.css\" />
-    <link rel=\"stylesheet\" type=\"text/css\" href=\"csslib/TableTools.css\" />
-    <link rel=\"stylesheet\" type=\"text/css\" href=\"csslib/TableTools_JUI.css\" />
-    </head><body></body</html>")
-    }
-
-moveRTFiles <- function(basePath,reportDirectory,...){
-    if(missing(basePath) || is.null(basePath)){
-        baseDir <- file.path(reportDirectory)
-    } else {
-        baseDir <- file.path(basePath,reportDirectory)
-    }
-    
-    csslib <- gsub("//+","/",file.path(baseDir,'csslib'))
-    imageslib <- gsub("//+","/",file.path(csslib,'images'))
-    jslib <- gsub("//+","/",file.path(baseDir,'jslib'))
-    
-    sapply(c(csslib,imageslib,jslib),
-           dir.create,
-           showWarnings=FALSE,
-           recursive=TRUE)
-    
-    css.files <- list.files(system.file("extdata/csslib",package='simrR'),pattern="\\.css$",
-                            full=TRUE)
-    js.files <- list.files(system.file("extdata/jslib",package='simrR'),pattern="\\.js$|\\.swf$",
-                           full=TRUE)
-    images <- list.files(system.file("extdata/csslib/images",package='simrR'),pattern="\\.png$",
-                         full=TRUE,
-                         recursive=TRUE)
-    cssDir <- gsub("//+","/",file.path(baseDir,"csslib"))
-    imagesDir <- gsub("//+","/",file.path(cssDir,"images"))
-    jsDir <- gsub("//+","/",file.path(baseDir,"jslib"))
-
-    file.copy(css.files,cssDir,overwrite=TRUE,recursive=TRUE)
-    file.copy(js.files,jsDir,overwrite=TRUE,recursive=TRUE)
-    file.copy(images,imagesDir,overwrite=TRUE,recursive=TRUE)
-
-}
-
-makeHTMLSimr <- function(basePath, reportDirectory, shortName, ...)
-    {
-       loc = ReportingTools:::makeReportPath(basePath, reportDirectory,shortName)
-        new("ReportHandlers",
-            init = function(node, args)
-            {
-                moveRTFiles(basePath,reportDirectory)
-                
-                ori.body = node[["body"]]
-                rnode = xmlRoot(node)
-                realdom = do.call(args$startPage,args)
-                newrnode = xmlRoot(realdom)
-                removeChildren(rnode, kids = xmlChildren(rnode))
-                addChildren(rnode, kids = xmlChildren(newrnode))
-                replaceNodes(rnode[["body"]],ori.body)
-                
-                node
-            },
-            ## finish by writing the file
-            finish =  function(rep, args)
-            {
-                saveXML(rep$.reportDOM, file=loc)
-            },
-            ## arguments are collected by handler, we want everything to   
-            ## go to the init handler...
-           args = list(init = list(startPage = newStartPage, ...)),
-            location = loc
-            )
     }
