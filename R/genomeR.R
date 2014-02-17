@@ -328,21 +328,27 @@ getTxRelCov<-
 featCovViews <-
     function(BFL,features,lib.strand=c("anti","sense","none"),min.lim=50,nCores=16,...){
         if(!is(BFL,'BamFileList')) stop("A BamFileList is required")
-        if(!length(BFL)>0) stop("Need to pass at least one BamFile")
+        if(!length(BFL)>0) stop("Need to pass at least one BamFile",call.=FALSE)
         lib.strand <- match.arg(lib.strand)
-                
+
+        BFL.seqlevs <- unique(as.vector(sapply(BFL,seqlevels)))
         
+        ## is there at least one chr name in BFL found in features? if not, bail out...
+        if (sum(BFL.seqlevs %in% seqlevels(features)) == 0){
+            stop("No compatible seqnames between the bam files and features were found",call.=FALSE)
+        }
         ## Make sure I will not stumble of problematic tx
-        if (!all(seqlevels(features) %in% seqlevels(BFL[[1]]))){
-            seqlevels(features,force=TRUE) <- seqlevels(BFL[[1]])
+        if (!all(seqlevels(features) %in% BFL.seqlevs)){
+            seqlevs <- BFL.seqlevs[BFL.seqlevs %in% seqlevels(features)]
+            seqlevels(features,force=TRUE) <- seqlevs
         }
         if(any(isCircular(features)[!is.na(isCircular(features))])) {
             seqlevels(features,force=TRUE) <- seqlevels(features)[!isCircular(features)]
         }
         
-        computeCovs <-function(id,chrs,BFL,gnModel){
+        computeCovs <-function(id,chrs,BFL.chrs,gnModel){
             chr <- chrs[id]
-            BF <- BFL[[id]]
+            BF <- BFL.chrs[[id]]
             gnModel <- gnModel[seqnames(unlist(range(gnModel))) == chr]
             s.i <- seqinfo(BF) 
             seq.length <- seqlengths(s.i)[chr]
@@ -402,8 +408,10 @@ featCovViews <-
                   c(ranges(cov.views$'+'),shift(ranges(cov.views$'-'),length(subject(cov.views$'+')))))
         }
         
-        chrs <- as.vector(sapply(BFL,seqlevels))
-        BFL.chrs <- rep(BFL,elementLengths(lapply(BFL,seqlevels)))
+        ## Simillarly, no need to visit seqnames in BFL not found in features
+        ## No need to be wastefull, runs only on seqnames that are in the features DB
+        chrs <- as.vector(sapply(BFL,function(BF) seqlevels(BF)[seqlevels(BF) %in% seqlevels(features)]))
+        BFL.chrs <- rep(BFL,sapply(BFL, function(BF) length(seqlevels(BF)[seqlevels(BF) %in% seqlevels(features)])))
         
         raw.covs <- mclapply(seq_along(chrs),
                              computeCovs,
@@ -499,9 +507,12 @@ bams2bw <-
                 
 
         if(!is(BFL,'BamFileList')) stop("A BamFileList is required")
-                                                                    
+        
         if(!length(BFL)>0) stop("Need to pass at least one BamFile")
-            
+
+        ## Create bam index if they don't exits
+        parIndexBam(BFL,nCores)
+        
         dir.create(destdir,FALSE,TRUE)
         
         covs <- bams2Covs(BFL,lib.strand,nCores)
