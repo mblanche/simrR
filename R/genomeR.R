@@ -325,6 +325,92 @@ getTxRelCov<-
         res <- mapply(relCovs,frag.sums,feat.sums,SIMPLIFY=FALSE)
     }
 
+featCovViews2 <- function(BFL,gnModel,lib.strand=c("anti","sense","none"),min.lim=(50*50),nCores=16,...){
+    
+
+    if(lib.strand=='none'){
+        isMinus <- rep(NA,length(BFL))
+    }else{
+        isMinus <- rep(c(FALSE,TRUE),length(BFL))
+    }
+
+    BFL.t <- rep(BFL,each=length(unique(isMinus)))
+    
+    cov.raw <- mclapply(seq_along(isMinus),function(i){
+        coverage(BFL.t[[i]],param=ScanBamParam(scanBamFlag(isMinusStrand=isMinus[[i]])))
+    },mc.cores=nCores,mc.preschedule=FALSE)
+    
+    covs <- do.call(c,cov.raw)
+    cov.strands <- switch(lib.strand,
+                          none = rep('*',sapply(cov.raw,length)),
+                          sense = ifelse(rep(isMinus,sapply(cov.raw,length)),'-','+'),
+                          anti  = ifelse(rep(isMinus,sapply(cov.raw,length)),'+','-'),
+                          )
+    cov.chrs <- unlist(lapply(cov.raw,names))
+
+    gene.strand <- strand(unlist(range(gnModel)))
+    gene.seqnames <- seqnames(unlist(range(gnModel)))
+    
+    views.raw <- mclapply(seq_along(cov.chrs),function(i){
+        ## No need to go further if the visited seqnames is empty
+        ## Might want to prefilter before... might be faster
+        if(sum(covs[[i]]) == 0) return(Views(Rle(),IRanges()))
+        ## Extract the given slot
+        s <- cov.strands[[i]]
+        chr <- cov.chrs[[i]]
+        cov <- covs[[i]]
+        ## Extract the exons as GRanges
+        exons <- unlist(gnModel[gene.strand==s & gene.seqnames==chr])
+        ## Compute the Views for every exons
+        exon.views <- Views(cov,ranges(exons))
+        ## Keep only the transcripts with at least min.lim coverage
+        #exon.views <- exon.views[sum(exon.views) >= min.lim]
+        names(exon.views) <- NULL
+        ## Return an RLE of the splice coverage of all each exons
+        ## Flip the coverages if we are dealing with feature on the negative strand
+        exon.covs <- do.call(c,viewApply(exon.views,function(cov){if(s=='-'){rev(cov)}else{cov}}))
+        ## compute the location of each transcripts (spliced exons) on the new spliced coverage
+        tx.width <- sapply(split(width(exons),rep(seq_along(gnModel[gene.strand==s & gene.seqnames==chr]),
+                                                  elementLengths(gnModel[gene.strand==s & gene.seqnames==chr]))),sum)
+        if (length(exon.covs)==0){
+            ## If nothing to return, return an empty RleViews
+            return(Views(Rle(),IRanges()))
+        } else {
+            ## Otherwise, return a views of the concat tx coverage
+            tx.views <- Views(exon.covs,
+                              IRanges(start=c(1,cumsum(tx.width[-length(tx.width)])+1),width=tx.width))
+            names(tx.views) <- names(gnModel[gene.strand==s & gene.seqnames==chr])
+            return(tx.views)
+        }
+    }
+                          ,mc.cores=nCores
+                          ,mc.preschedule=TRUE)
+
+    ## Remap the data to the original BFL
+    res <- mclapply(split(views.raw,rep(path(BFL.t),sapply(cov.raw,length))),function(views){
+        ## recover all the coverages into a single coverage
+        subject <- do.call(c,lapply(views,subject))
+        ## Recover all the different ranges
+        ranges <- lapply(views,ranges)
+        ## recover the transcript names
+        tx.names <- do.call(c,lapply(views,names))
+        ## Compute the amount of shifts the second to the last ranges need to be incremented
+        shifts <- cumsum(lapply(views,function(x) length(subject(x)))[-length(views)])
+        ## Shifts the ranges and recover a single final range
+        shifted <- do.call(c,c(list(ranges(views[[1]])),mapply(shift,ranges[-1],shifts,SIMPLIFY=FALSE))) 
+        ## Assemble a single Views object
+        res <- Views(subject,shifted)
+        names(res) <- tx.names
+        return(res)
+    },mc.preschedule=FALSE,mc.cores=nCores)
+
+    ## rename the final list of views
+    names(res) <- sub("\\.bam","",basename(path(BFL)))
+    ## return
+    return(res)
+}
+
+
 featCovViews <-
     function(BFL,features,lib.strand=c("anti","sense","none"),min.lim=50,nCores=16,...){
         if(!is(BFL,'BamFileList')) stop("A BamFileList is required")
@@ -433,7 +519,6 @@ featCovViews <-
         names(res) <- sub("\\.bam$","",basename(names(BFL)))
         return(res)
     }
-
 
 covsPerChr <-
     function(id,chrs,BFL,lib.strand=c("none","sense","anti")){
