@@ -371,7 +371,7 @@ featCovViews2 <-
                 names(tx.views) <- names(sub.gn)
                 return(tx.views)
             }
-        },mc.cores=nCores,mc.preschedule=FALSE)
+        },mc.cores=nCores,mc.preschedule=ifelse(length(covs)/nCores > 100,TRUE,FALSE))
         
         ## Reduce the data to the original BFL
         res <- mclapply(split(views.raw,sapply(covs,function(x) path(x$BF))),function(views){
