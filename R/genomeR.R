@@ -376,6 +376,7 @@ featCovViews2 <-
         ## Reduce the data to the original BFL
         res <- mclapply(split(views.raw,sapply(covs,function(x) path(x$BF))),function(views){
             ## recover all the coverages into a single coverage
+            names(views) <- NULL
             subject <- do.call(c,lapply(views,subject))
             ## Recover all the different ranges
             ranges <- lapply(views,ranges)
