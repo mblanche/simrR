@@ -327,7 +327,6 @@ getTxRelCov<-
 
 featCovViews2 <-
     function(BFL,gnModel,coverage.loading=c('bySeqname','byFile'),lib.strand=c("anti","sense","none"),nCores=16,...){
-
         lib.strand <- match.arg(lib.strand)
         coverage.loading <- match.arg(coverage.loading)
         
@@ -456,6 +455,61 @@ covByFile <- function(BFL,lib.strand,nCores=16){
     cov.BFL <- rep(BFLs,sapply(cov.raw,length))
     ## Return a list of named lists
     mapply(list,coverage=covs,seqname=cov.chrs,strand=cov.strands,BF=cov.BFL,SIMPLIFY=FALSE)
+}
+
+
+getCovsMatrix <- function(cov.view,cut.number=100,type=c('relative','sum.coverage'),nCores=15,min.coverage=(50*50)){
+    ## Filter tx with less than min.coverage coverage
+    cov.view <- cov.view[sum(cov.view)>=min.coverage]
+    ##Remove the transcripts shorter than the number of bins... Not sure what to do with them
+    cov.view <- cov.view[width(cov.view)>=cut.number]
+    ## Breaks every transcripts in 100 bins, find the cuts
+    cuts <- viewApply(cov.view,function(x) cut(seq_along(x),cut.number,labels=FALSE),simplify=FALSE)
+    ## Retrieve the coverages from teh Views as vectors
+    cov.vecs <- viewApply(cov.view,as.vector,simplify=FALSE)
+    ## Compute the coverage sums for each cuts
+    res <- do.call(rbind,mclapply(seq_along(cov.vecs), function(i) sapply(split(cov.vecs[[i]],cuts[[i]]),sum),mc.cores=nCores))
+    ## get teh gene names for each row
+    row.names(res) <- names(res)
+    ## return in relative space if asked
+    if(type=='relative') res <- res/rowSums(res)
+    ## Return
+    return(res)
+}
+
+getCovsMatrix2 <- function(cov.views,cut.number=100,type=c('relative','sum.coverage'),nCores=15,min.coverage=(50*50)){
+    type <- match.arg(type)
+    ## Filter tx with less than min.coverage coverage
+    cov.views <- mclapply(cov.views,function(cov.view) cov.view[sum(cov.view)>=min.coverage],mc.cores=nCores,mc.preschedule=FALSE)
+    ##Remove the transcripts shorter than the number of bins... Not sure what to do with them
+    cov.views <- mclapply(cov.views,function(cov.view) cov.view[width(cov.view)>=cut.number],mc.cores=nCores,mc.preschedule=FALSE)
+    ## Breaks every transcripts in 100 bins, find the cuts
+    cuts <- mclapply(cov.views,function(cov.view){
+        viewApply(cov.view,function(x) cut(seq_along(x),cut.number,labels=FALSE),simplify=FALSE)
+    },mc.cores=nCores,mc.preschedule=FALSE)
+    names(cuts) <- NULL
+    cuts <- do.call(c,cuts)
+    ## Retrieve the coverages from teh Views as vectors
+    cov.vecs <- mclapply(cov.views,function(cov.view){
+        viewApply(cov.view,as.vector,simplify=FALSE)
+    },mc.cores=nCores,mc.preschedule=FALSE)
+    names(cov.vecs) <- NULL
+    cov.vecs <- do.call(c,cov.vecs)
+    ## Compute the coverage sums for each cuts
+    res.raw <- mclapply(seq_along(cov.vecs), function(i) sapply(split(cov.vecs[[i]],cuts[[i]]),sum),mc.cores=nCores)
+    ## Need to reduce to the original cov.views
+    res <- lapply(split(res.raw,rep(seq_along(cov.views),sapply(cov.views,length))),do.call,what=rbind)
+    ## get the gene names for each row
+    res <- mapply(function(r,c.v){
+        row.names(r) <- names(c.v)
+        return(r)
+    },res,cov.views)
+    ## return in relative space if asked
+    if(type=='relative') res <- lapply(res,function(res) res/rowSums(res))
+    ## Name the list with the original cov.views names
+    names(res) <- names(cov.views)
+    ## Return
+    return(res)
 }
 
 featCovViews <-
