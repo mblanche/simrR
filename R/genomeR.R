@@ -394,8 +394,8 @@ featCovViews2 <-
         
     ## rename the final list of views
     names(res) <- sub("\\.bam","",basename(path(BFL)))
-    ## return
-    return(res)
+    ## return as a fancy Bioc object!
+    return(RleViewsList(res))
 }
 
 covByChr <- function(BFL,lib.strand,nCores=16){
