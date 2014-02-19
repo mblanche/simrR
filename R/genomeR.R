@@ -326,7 +326,7 @@ getTxRelCov<-
     }
 
 featCovViews2 <-
-    function(BFL,gnModel,coverage.loading=c('bySeqname','byFile'),lib.strand=c("anti","sense","none"),min.lim=(50*50),nCores=16,...){
+    function(BFL,gnModel,coverage.loading=c('bySeqname','byFile'),lib.strand=c("anti","sense","none"),nCores=16,...){
 
         lib.strand <- match.arg(lib.strand)
         coverage.loading <- match.arg(coverage.loading)
