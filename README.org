@@ -2,15 +2,16 @@
 #+SETUPFILE: "~mab/genomic_analysis/setup.org"
 #+TITLE: simrR: A companinon package to GenomicRanges and cie.
 
+* simrR: A companinon package to GenomicRanges and cie.
 
 simrR is a set of tools for commonly found problems dealing with genomic
 data. It is meant as an series of extension to the very popular and powerfull
 packages GenomicRanges, GenomiceFeatures, Rsamtools and the likes.
 
-  * It provides fast parallelized functions to read and counts bam files
-  * Provides conversion function for GRanges to and from UCSC 'chr' convention
-  * Provides tools to convert exons per genes into there uxons/ixons and the likes
-  * Provides rapid and parallelized functions for standard mRNA-Seq QC
+  - It provides fast parallelized functions to read and counts bam files
+  - Provides conversion function for GRanges to and from UCSC 'chr' convention
+  - Provides tools to convert exons per genes into there uxons/ixons and the likes
+  - Provides rapid and parallelized functions for standard mRNA-Seq QC
 
 This package is still very much under development. Many functions are not fully stable 
 and not bullet proof to all edges cases. If you find something that breaks, let me know.
