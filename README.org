@@ -1,6 +1,5 @@
 # -*- org-export-babel-evaluate: nil; org-export-allow-BIND: t -*-
 #+SETUPFILE: "~mab/genomic_analysis/setup.org"
-#+TITLE: simrR: A companinon package to GenomicRanges and cie.
 
 * simrR: A companinon package to GenomicRanges and cie.
 
