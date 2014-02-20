@@ -483,14 +483,16 @@ getCovsMatrix2 <- function(cov.views,cut.number=100,type=c('relative','sum.cover
     cov.views <- mclapply(cov.views,function(cov.view) cov.view[sum(cov.view)>=min.coverage],mc.cores=nCores,mc.preschedule=FALSE)
     ##Remove the transcripts shorter than the number of bins... Not sure what to do with them
     cov.views <- mclapply(cov.views,function(cov.view) cov.view[width(cov.view)>=cut.number],mc.cores=nCores,mc.preschedule=FALSE)
+    ## if coverage is very sparse, some Views my by empty after the filtering. Keep track of them
+    is.empty <- sapply(cov.views,length)==0
     ## Breaks every transcripts in 100 bins, find the cuts
-    cuts <- mclapply(cov.views,function(cov.view){
+    cuts <- mclapply(cov.views[!is.empty],function(cov.view){
         viewApply(cov.view,function(x) cut(seq_along(x),cut.number,labels=FALSE),simplify=FALSE)
     },mc.cores=nCores,mc.preschedule=FALSE)
     names(cuts) <- NULL
     cuts <- do.call(c,cuts)
     ## Retrieve the coverages from teh Views as vectors
-    cov.vecs <- mclapply(cov.views,function(cov.view){
+    cov.vecs <- mclapply(cov.views[!is.empty],function(cov.view){
         viewApply(cov.view,as.vector,simplify=FALSE)
     },mc.cores=nCores,mc.preschedule=FALSE)
     names(cov.vecs) <- NULL
@@ -498,14 +500,18 @@ getCovsMatrix2 <- function(cov.views,cut.number=100,type=c('relative','sum.cover
     ## Compute the coverage sums for each cuts
     res.raw <- mclapply(seq_along(cov.vecs), function(i) sapply(split(cov.vecs[[i]],cuts[[i]]),sum),mc.cores=nCores)
     ## Need to reduce to the original cov.views
-    res <- lapply(split(res.raw,rep(seq_along(cov.views),sapply(cov.views,length))),do.call,what=rbind)
+    res.t <- lapply(split(res.raw,rep(seq_along(cov.views[!is.empty]),sapply(cov.views[!is.empty],length))),do.call,what=rbind)
     ## get the gene names for each row
-    res <- mapply(function(r,c.v){
+    res.t <- mapply(function(r,c.v){
         row.names(r) <- names(c.v)
         return(r)
-    },res,cov.views)
+    },res.t,cov.views[!is.empty])
     ## return in relative space if asked
-    if(type=='relative') res <- lapply(res,function(res) res/rowSums(res))
+    if(type=='relative') res.t <- lapply(res.t,function(res) res/rowSums(res))
+    ## Create the list of resutls
+    res <- list()
+    res[is.empty] <- NA
+    res[!is.empty] <- res.t
     ## Name the list with the original cov.views names
     names(res) <- names(cov.views)
     ## Return
