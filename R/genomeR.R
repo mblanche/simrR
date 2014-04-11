@@ -459,6 +459,7 @@ covByFile <- function(BFL,lib.strand,nCores=16){
 
 
 getCovsMatrix <- function(cov.view,cut.number=100,type=c('relative','sum.coverage'),nCores=15,min.coverage=(50*50)){
+    type <- match.arg(type)
     ## Filter tx with less than min.coverage coverage
     cov.view <- cov.view[sum(cov.view)>=min.coverage]
     ##Remove the transcripts shorter than the number of bins... Not sure what to do with them
@@ -693,42 +694,39 @@ bams2Covs <-
 
 bams2bw <-
     function(BFL,destdir=c("bigwig"),lib.strand=c("none","sense","anti"),lib.norm=TRUE,nCores=16){
-        if(!is(BFL,'BamFileList')) stop("A BamFileList is required")
-        if(!length(BFL)>0) stop("Need to pass at least one BamFile")
+        ## Testing arguments
         lib.strand <- match.arg(lib.strand)
-                
-
         if(!is(BFL,'BamFileList')) stop("A BamFileList is required")
-        
         if(!length(BFL)>0) stop("Need to pass at least one BamFile")
 
         ## Create bam index if they don't exits
         parIndexBam(BFL,nCores)
-        
-        dir.create(destdir,FALSE,TRUE)
-        
+
+        ## For each bam files, compute the coverage
         covs <- bams2Covs(BFL,lib.strand,nCores)
+
+        ## Normalize the cov over library size, return in cpb
+        if (lib.norm){
+            covs <- lapply(covs,function(cov) {
+                total.cov <- sum(as.numeric(sapply(cov,function(cov) sapply(cov,sum))))
+                lapply(cov, function(cov) as(lapply(cov,function(cov) (cov/total.cov)*1e9),'RleList'))
+            })
+        }
         
-        covs.GR <- mclapply(unlist(covs),as,'GRanges',
-                            mc.cores=nCores,
-                            mc.preschedule=FALSE)
-        ## Ok, every even slot in the covs.GR list is of the negative strand (ie 1:lenght(list)%%2)
         ## Flip the sign on the coverage value if the library is stranded
         if(lib.strand!='none'){
-            anti.cov <- covs.GR[seq_along(covs.GR)%%2 == 0]
-            anti.cov <- lapply(anti.cov,function(anti.cov){
-                values(anti.cov)$score <- -values(anti.cov)$score
-                anti.cov
-            })
-            covs.GR[seq_along(covs.GR)%%2 == 0] <- anti.cov
-        }
-        ## Normalize the coverage over the library size
-        if(lib.norm){
-            covs.GR <- lapply(covs.GR,function(c){
-                values(c)$score <- values(c)$score/(abs(sum(as.numeric(values(c)$score)))/1e8)
-                return(c)
+            covs <- lapply(covs,function(cov){
+                c <- lapply(cov$'-',function(x){
+                    runValue(x) <- -runValue(x)
+                    return(x)
+                })
+                cov$'-' <- as(c,'RleList')
+                return(cov)
             })
         }
+
+        ## Save files in new dir
+        dir.create(destdir,FALSE,TRUE)
         ## Creating file names and file paths        
         if(lib.strand == 'none'){
             bw <- paste(names(covs),"bw",sep=".")
@@ -737,6 +735,10 @@ bams2bw <-
             bw <- as.vector(sapply(sub("\\.bam$","",basename(names(BFL))),paste0,suffix))
         }
         bw.path <- file.path(destdir,bw)
+        ## Covert the RleList of coverages back to GRanges
+        covs.GR <- mclapply(unlist(covs),as,'GRanges',
+                            mc.cores=nCores,
+                            mc.preschedule=FALSE)
         ## Exporting as bigwigs
         mclapply(seq_along(covs.GR),function(i) export(covs.GR[[i]],bw.path[[i]]),
                  mc.cores=nCores,
