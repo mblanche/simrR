@@ -709,18 +709,14 @@ bams2bw <-
         if (lib.norm){
             covs <- lapply(covs,function(cov) {
                 total.cov <- sum(as.numeric(sapply(cov,function(cov) sapply(cov,sum))))
-                lapply(cov, function(cov) as(lapply(cov,function(cov) (cov/total.cov)*1e9),'RleList'))
+                lapply(cov, function(cov) cov/total.cov * 1e9)
             })
         }
         
         ## Flip the sign on the coverage value if the library is stranded
         if(lib.strand!='none'){
             covs <- lapply(covs,function(cov){
-                c <- lapply(cov$'-',function(x){
-                    runValue(x) <- -runValue(x)
-                    return(x)
-                })
-                cov$'-' <- as(c,'RleList')
+                cov$'-' <- cov$'-' * -1
                 return(cov)
             })
         }
@@ -735,10 +731,12 @@ bams2bw <-
             bw <- as.vector(sapply(sub("\\.bam$","",basename(names(BFL))),paste0,suffix))
         }
         bw.path <- file.path(destdir,bw)
+        
         ## Covert the RleList of coverages back to GRanges
         covs.GR <- mclapply(unlist(covs),as,'GRanges',
                             mc.cores=nCores,
                             mc.preschedule=FALSE)
+
         ## Exporting as bigwigs
         mclapply(seq_along(covs.GR),function(i) export(covs.GR[[i]],bw.path[[i]]),
                  mc.cores=nCores,
