@@ -682,7 +682,7 @@ bams2Covs <-
         
         covs <- lapply(split(covs,path(BFL2chrs)),function(covs){
             if (lib.strand == 'none'){
-                covs <- RleList(covs)
+                covs <- RleList(covs,compress=FALSE)
             } else {
                 covs <- list('+' = RleList(lapply(covs,function(x) x$`+`),compress=FALSE),
                              '-' = RleList(lapply(covs,function(x) x$`-`),compress=FALSE))
