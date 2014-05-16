@@ -336,6 +336,7 @@ featCovViews2 <-
         }else{
             covs <- covByChr(BFL,lib.strand,nCores)
         }
+
         ## These two operations can be time consuming, let's compute them outside the inner loop
         gene.strand <- strand(unlist(range(gnModel)))
         gene.seqnames <- seqnames(unlist(range(gnModel)))
@@ -370,7 +371,8 @@ featCovViews2 <-
                 names(tx.views) <- names(sub.gn)
                 return(tx.views)
             }
-        },mc.cores=nCores,mc.preschedule=ifelse(length(covs)/nCores > 100,TRUE,FALSE))
+        },mc.cores=nCores,mc.preschedule=FALSE)
+        #},mc.cores=nCores,mc.preschedule=ifelse(length(covs)/nCores > 100,TRUE,FALSE))
         
         ## Reduce the data to the original BFL
         res <- mclapply(split(views.raw,sapply(covs,function(x) path(x$BF))),function(views){
@@ -471,7 +473,7 @@ getCovsMatrix <- function(cov.view,cut.number=100,type=c('relative','sum.coverag
     ## Compute the coverage sums for each cuts
     res <- do.call(rbind,mclapply(seq_along(cov.vecs), function(i) sapply(split(cov.vecs[[i]],cuts[[i]]),sum),mc.cores=nCores))
     ## get teh gene names for each row
-    row.names(res) <- names(res)
+    row.names(res) <- names(cov.view)
     ## return in relative space if asked
     if(type=='relative') res <- res/rowSums(res)
     ## Return
@@ -708,8 +710,13 @@ bams2bw <-
         ## Normalize the cov over library size, return in cpb
         if (lib.norm){
             covs <- lapply(covs,function(cov) {
-                total.cov <- sum(as.numeric(sapply(cov,function(cov) sapply(cov,sum))))
-                lapply(cov, function(cov) cov/total.cov * 1e9)
+                if(lib.strand='none'){
+                    total.cov <- sum(sapply(cov,function(x) sum(as.numeric(x))))
+                    cov/total.cov * 1e9
+                } else {
+                    total.cov <- sapply(cov,function(cov) sum(sapply(cov,function(x) sum(as.numeric(x)))) )
+                    lapply(cov, function(cov) cov/total.cov * 1e9)
+                }
             })
         }
         
