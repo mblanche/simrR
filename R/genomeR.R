@@ -710,7 +710,7 @@ bams2bw <-
         ## Normalize the cov over library size, return in cpb
         if (lib.norm){
             covs <- lapply(covs,function(cov) {
-                if(lib.strand='none'){
+                if(lib.strand=='none'){
                     total.cov <- sum(sapply(cov,function(x) sum(as.numeric(x))))
                     cov/total.cov * 1e9
                 } else {
