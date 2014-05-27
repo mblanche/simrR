@@ -326,17 +326,23 @@ getTxRelCov<-
     }
 
 featCovViews2 <-
-    function(BFL,gnModel,coverage.loading=c('bySeqname','byFile'),lib.strand=c("anti","sense","none"),nCores=16,...){
+    function(BFL,
+             gnModel,
+             lib.strand=c("anti","sense","none"),
+             lib.norm=FALSE,
+             coverage.loading=c('bySeqname','byFile'),
+             nCores=16,
+             ...){
         lib.strand <- match.arg(lib.strand)
         coverage.loading <- match.arg(coverage.loading)
         
         ## Map the data for the coverages
         if(coverage.loading == 'byFile'){
-            covs <- covByFile(BFL,lib.strand,nCores)
+            covs <- covByFile(BFL,lib.strand,lib.norm,nCores)
         }else{
-            covs <- covByChr(BFL,lib.strand,nCores)
+            covs <- covByChr(BFL,lib.strand,lib.norm,nCores)
         }
-
+        
         ## These two operations can be time consuming, let's compute them outside the inner loop
         gene.strand <- strand(unlist(range(gnModel)))
         gene.seqnames <- seqnames(unlist(range(gnModel)))
@@ -396,10 +402,10 @@ featCovViews2 <-
     ## rename the final list of views
     names(res) <- sub("\\.bam","",basename(path(BFL)))
     ## return as a fancy Bioc object!
-    return(RleViewsList(res))
+        return(RleViewsList(res))
 }
 
-covByChr <- function(BFL,lib.strand,nCores=16){
+covByChr <- function(BFL,lib.strand,lib.norm=FALSE,nCores=16){
     if(lib.strand=='none'){
         isMinus <- NA
     }else{
@@ -428,17 +434,36 @@ covByChr <- function(BFL,lib.strand,nCores=16){
                  anti  = ifelse(strands[[i]],'+','-')),
              BF=BF)
     },mc.cores=nCores,mc.preschedule=FALSE)
+
+    ## Normalize the coverages on library size
+    ## A bit convoluted but required because of the parallelism...
+    if(lib.norm){
+        ## For each entry, get the sum of the coverage
+        counts.raw <- sapply(covs.raw,function(x) as.numeric(sum(x$coverage)))
+        ## Figure out the skeleton of the list (wich entry goes with what BF)
+        skel <- sapply(covs.raw,function(x) path(x$BF))
+        ## For each BF, get a total counts
+        totals.raw <- sapply(split(counts.raw,skel),sum)
+        ## Expand the counts to match every entry in the covs.raw
+        totals <- rep(totals,sapply(split(counts.raw,skel),length))
+        ## Do the normalization
+        covs.raw <- mapply(function(cov,counts){
+            cov$coverage <- cov$coverage/counts * 1e9
+            return(cov)
+        },covs.raw,totals,SIMPLIFY=FALSE)
+    }
+    return(covs.raw)
 }
 
 
-covByFile <- function(BFL,lib.strand,nCores=16){
+covByFile <- function(BFL,lib.strand,lib.norm=FALSE,nCores=16){
     ## Define the strand that need to be read
     if(lib.strand=='none'){
         isMinus <- rep(NA,length(BFL))
     }else{
         isMinus <- rep(c(FALSE,TRUE),length(BFL))
     }
-    ## Assemble a list of bam file to visit, augmented with stranded
+    ## Assemble a list of bam file to visit, augmented with strand
     BFLs <- rep(BFL,each=length(unique(isMinus)))
     ## Read the bam, compute the coverage
     cov.raw <- mclapply(seq_along(isMinus),function(i){
@@ -447,6 +472,16 @@ covByFile <- function(BFL,lib.strand,nCores=16){
         cov <- coverage(unlist(grglist(readGAlignmentsFromBam(BFLs[[i]],param=param))))
         ## Computing the coverages on the seqlevels
     },mc.cores=nCores,mc.preschedule=FALSE)
+    
+    ## Normalize the coverage for library size
+    if(lib.norm){
+        counts <- sapply(cov.raw,function(x) sum(as.numeric(sum(x))))
+        if(lib.strand!='none'){
+            counts <- rep(sapply(split(counts,rep(seq(BFL),each=2)),sum),each=2)
+        }
+        cov.raw <- mapply(function(cov,counts) cov/counts * 1e9,cov.raw,counts)
+    }
+    
     covs <- do.call(c,cov.raw)
     cov.strands <- switch(lib.strand,
                           none = rep('*',sum(sapply(cov.raw,length))),
