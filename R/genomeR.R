@@ -102,7 +102,7 @@ BamsGeneCount <- function(BFL,
 uxonify <- function(txdb){ reduce(exonsBy(txdb,'gene')) }
 
 ixonify <- function(txdb){
-  uxons <- uxonfiy(txdb)
+  uxons <- uxonify(txdb)
   genes <- unlist(range(uxons))
   psetdiff(genes,uxons)
 }
@@ -354,6 +354,7 @@ featCovViews2 <-
             if(sum(cov$coverage) == 0) return(Views(Rle(),IRanges()))
             ## Extract the only the visited features
             sub.gn <- gnModel[gene.strand==cov$strand & gene.seqnames==cov$seqname]
+            sub.gn <- sub.gn[elementLengths(sub.gn) != 0]
             ## Extract the exons as GRanges
             exons <- unlist(sub.gn)
             ## Compute the Views for every exons
@@ -365,8 +366,8 @@ featCovViews2 <-
             ## Flip the coverages if we are dealing with feature on the negative strand
             exon.covs <- do.call(c,viewApply(exon.views,function(x){if(cov$strand=='-'){rev(x)}else{x}}))
             ## compute the location of each transcripts (spliced exons) on the new spliced coverage
-            tx.width <- sapply(split(width(exons),rep(seq_along(sub.gn),elementLengths(sub.gn))),sum)
-            ## Finish by building a new view of the spliced coverage
+            tx.width <- sapply(split(width(exons),rep(seq(sub.gn),elementLengths(sub.gn))),sum)
+                        ## Finish by building a new view of the spliced coverage
             if (length(exon.covs)==0){
                 ## If nothing to return, return an empty RleViews
                 return(Views(Rle(),IRanges()))
@@ -445,7 +446,7 @@ covByChr <- function(BFL,lib.strand,lib.norm=FALSE,nCores=16){
         ## For each BF, get a total counts
         totals.raw <- sapply(split(counts.raw,skel),sum)
         ## Expand the counts to match every entry in the covs.raw
-        totals <- rep(totals,sapply(split(counts.raw,skel),length))
+        totals <- rep(totals.raw,sapply(split(counts.raw,skel),length))
         ## Do the normalization
         covs.raw <- mapply(function(cov,counts){
             cov$coverage <- cov$coverage/counts * 1e9
