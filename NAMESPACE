@@ -1,6 +1,7 @@
 exportPattern("^[[:alpha:]]+")
 #importMethodsFrom(IRanges,unlist)
 import(GenomicFeatures)
+import(GenomicAlignments)
 import(parallel)
 import(BiocGenerics)
 import(IRanges)
