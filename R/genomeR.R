@@ -751,7 +751,7 @@ bams2bw <-
                     cov/total.cov * 1e9
                 } else {
                     total.cov <- sapply(cov,function(cov) sum(sapply(cov,function(x) sum(as.numeric(x)))) )
-                    lapply(cov, function(cov) cov/total.cov * 1e9)
+                    mapply(function(c,t) c/t*1e9,cov,total.cov)
                 }
             })
         }
